@@ -33,6 +33,7 @@ import org.rocksdb.*;
 public class RocksDBMetronome implements Closeable {
 
     private static final Logger logger = LoggerFactory.getLogger(RocksDBMetronome.class);
+
     private static Charset UTF8 = Charset.forName("UTF-8");
     private static final byte[] ZERO_BYTE = new byte[]{0};
     private static final byte[] CONFIGURATION_FAMILY = "configuration.column.family".getBytes(UTF8);
@@ -41,7 +42,6 @@ public class RocksDBMetronome implements Closeable {
     private final AtomicLong lastSyncWarningNanos = new AtomicLong(0L);
     private final int parallelThreads;
     private final int maxWriteBufferNumber;
-
     private final int minWriteBufferNumberToMerge;
     private final long writeBufferSize;
     private final long delayedWriteRate;
@@ -56,24 +56,23 @@ public class RocksDBMetronome implements Closeable {
     private final boolean createMissingColumnFamilies;
     private final boolean automaticSyncEnabled;
     private final long minSyncDelayMillis;
+    private final Path storagePath;
 
     private final ScheduledExecutorService syncExecutor;
 
-    private final Path storagePath;
+    private final AtomicInteger syncCounter = new AtomicInteger(0);
+    private final ReentrantLock syncLock = new ReentrantLock();
+    private final Condition syncCondition = syncLock.newCondition();
+
     private WriteOptions forceSyncWriteOptions;
     private WriteOptions noSyncWriteOptions;
     private RocksDB db;
     private ColumnFamilyHandle defaultColumnFamilyHandle;
     private ColumnFamilyHandle configurationColumnFamilyHandle;
     private ColumnFamilyHandle recordsColumnFamilyHandle;
-    private final AtomicInteger syncCounter = new AtomicInteger(0);
-    private final ReentrantLock syncLock = new ReentrantLock();
-    private final Condition syncCondition = syncLock.newCondition();
 
 
     public RocksDBMetronome(Builder builder) {
-
-
         minWriteBufferNumberToMerge = builder.minWriteBufferNumberToMerge;
         delayedWriteRate = builder.delayedWriteRate;
         writeBufferSize = builder.writeBufferSize;
@@ -82,9 +81,7 @@ public class RocksDBMetronome implements Closeable {
         maxBackgroundFlushes = builder.maxBackgroundFlushes;
         maxBackgroundCompactions = builder.maxBackgroundCompactions;
         statDumpSeconds = builder.statDumpSeconds;
-
         storagePath = builder.storagePath;
-
         parallelThreads = builder.parallelThreads;
         maxWriteBufferNumber = builder.maxWriteBufferNumber;
         syncWarningNanos = builder.syncWarningNanos;
@@ -92,13 +89,10 @@ public class RocksDBMetronome implements Closeable {
         createIfMissing = builder.createIfMissing;
         createMissingColumnFamilies = builder.createMissingColumnFamilies;
         automaticSyncEnabled = builder.automaticSyncEnabled;
+        minSyncDelayMillis = builder.minSyncDelayMillis;
 
         syncExecutor = Executors.newSingleThreadScheduledExecutor();
-
-
-        minSyncDelayMillis = builder.minSyncDelayMillis;
     }
-
 
     /**
      * Initialize the metronome
@@ -176,8 +170,6 @@ public class RocksDBMetronome implements Closeable {
         }
 
         logger.info("Initialized at {}", storagePath);
-
-
     }
 
 
@@ -247,8 +239,6 @@ public class RocksDBMetronome implements Closeable {
             if (exceptionReference.get() != null) {
                 throw new IOException(exceptionReference.get());
             }
-
-
         } finally {
             syncLock.unlock();
         }
@@ -337,7 +327,6 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
-
     private Path getStoragePath() {
         return storagePath;
     }
@@ -385,7 +374,6 @@ public class RocksDBMetronome implements Closeable {
     }
 
     public static class Builder {
-
 
         int parallelThreads = 8;
         int maxWriteBufferNumber = 4;
