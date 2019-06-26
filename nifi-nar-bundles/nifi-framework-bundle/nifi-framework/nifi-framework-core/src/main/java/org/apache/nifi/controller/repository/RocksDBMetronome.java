@@ -1,13 +1,19 @@
 package org.apache.nifi.controller.repository;
 
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +24,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 
+import org.apache.nifi.util.StringUtils;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 import org.apache.nifi.processor.DataUnit;
@@ -34,80 +41,99 @@ public class RocksDBMetronome implements Closeable {
 
     private static final Logger logger = LoggerFactory.getLogger(RocksDBMetronome.class);
 
-    private static Charset UTF8 = Charset.forName("UTF-8");
-    private static final byte[] ZERO_BYTE = new byte[]{0};
-    private static final byte[] CONFIGURATION_FAMILY = "configuration.column.family".getBytes(UTF8);
-    private static final byte[] RECORDS_FAMILY = "records.column.family".getBytes(UTF8);
+    private static final String CONFIGURATION_FAMILY = "configuration.column.family";
+    private static final String RECORDS_FAMILY = "records.column.family";
 
     private final AtomicLong lastSyncWarningNanos = new AtomicLong(0L);
     private final int parallelThreads;
     private final int maxWriteBufferNumber;
     private final int minWriteBufferNumberToMerge;
     private final long writeBufferSize;
+    private final long maxTotalWalSize;
     private final long delayedWriteRate;
     private final int level0SlowdownWritesTrigger;
     private final int level0StopWritesTrigger;
     private final int maxBackgroundFlushes;
     private final int maxBackgroundCompactions;
     private final int statDumpSeconds;
+    private final long minSyncDelayMillis;
     private final long syncWarningNanos;
+    private final Path storagePath;
     private final boolean adviseRandomOnOpen;
     private final boolean createIfMissing;
     private final boolean createMissingColumnFamilies;
+    private final boolean useFsync;
+
+    private final Set<byte[]> columnFamilyNames;
+    private final Map<String, ColumnFamilyHandle> columnFamilyHandles;
+
     private final boolean automaticSyncEnabled;
-    private final long minSyncDelayMillis;
-    private final Path storagePath;
-
     private final ScheduledExecutorService syncExecutor;
-
-    private final AtomicInteger syncCounter = new AtomicInteger(0);
     private final ReentrantLock syncLock = new ReentrantLock();
     private final Condition syncCondition = syncLock.newCondition();
 
-    private WriteOptions forceSyncWriteOptions;
-    private WriteOptions noSyncWriteOptions;
+    private final AtomicInteger syncCounter = new AtomicInteger(0);
     private RocksDB db;
-    private ColumnFamilyHandle defaultColumnFamilyHandle;
     private ColumnFamilyHandle configurationColumnFamilyHandle;
     private ColumnFamilyHandle recordsColumnFamilyHandle;
+    private WriteOptions forceSyncWriteOptions;
+    private WriteOptions noSyncWriteOptions;
 
 
     public RocksDBMetronome(Builder builder) {
+        statDumpSeconds = builder.statDumpSeconds;
+        parallelThreads = builder.parallelThreads;
+        maxWriteBufferNumber = builder.maxWriteBufferNumber;
         minWriteBufferNumberToMerge = builder.minWriteBufferNumberToMerge;
-        delayedWriteRate = builder.delayedWriteRate;
         writeBufferSize = builder.writeBufferSize;
+        maxTotalWalSize = builder.getMaxTotalWalSize();
+        delayedWriteRate = builder.delayedWriteRate;
         level0SlowdownWritesTrigger = builder.level0SlowdownWritesTrigger;
         level0StopWritesTrigger = builder.level0StopWritesTrigger;
         maxBackgroundFlushes = builder.maxBackgroundFlushes;
         maxBackgroundCompactions = builder.maxBackgroundCompactions;
-        statDumpSeconds = builder.statDumpSeconds;
-        storagePath = builder.storagePath;
-        parallelThreads = builder.parallelThreads;
-        maxWriteBufferNumber = builder.maxWriteBufferNumber;
+        minSyncDelayMillis = builder.minSyncDelayMillis;
         syncWarningNanos = builder.syncWarningNanos;
+        storagePath = builder.storagePath;
         adviseRandomOnOpen = builder.adviseRandomOnOpen;
         createIfMissing = builder.createIfMissing;
         createMissingColumnFamilies = builder.createMissingColumnFamilies;
-        automaticSyncEnabled = builder.automaticSyncEnabled;
-        minSyncDelayMillis = builder.minSyncDelayMillis;
+        useFsync = builder.useFsync;
+        columnFamilyNames = builder.columnFamilyNames;
+        columnFamilyHandles = new HashMap<>(columnFamilyNames.size());
 
-        syncExecutor = Executors.newSingleThreadScheduledExecutor();
+        automaticSyncEnabled = builder.automaticSyncEnabled;
+        syncExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = Executors.defaultThreadFactory().newThread(r);
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     /**
      * Initialize the metronome
      *
-     * @throws java.io.IOException - if there is an issue with the underlying database
+     * @throws java.io.IOException if there is an issue with the underlying database
      */
     public void initialize() throws IOException {
 
         final String rocksSharedLibDir = System.getenv("ROCKSDB_SHAREDLIB_DIR").trim();
         final String javaTmpDir = System.getProperty("java.io.tmpdir");
-        final String libDir = (rocksSharedLibDir.length() > 0) ? rocksSharedLibDir : javaTmpDir;
+        final String libDir = !StringUtils.isBlank(rocksSharedLibDir) ? rocksSharedLibDir : javaTmpDir;
         try {
             Files.createDirectories(Paths.get(libDir));
         } catch (IOException e) {
             throw new IOException("Unable to load the RocksDB shared library into directory: " + libDir, e);
+        }
+
+        // delete any previous librocksdbjni.so files
+        final File[] rocksSos = Paths.get(libDir).toFile().listFiles((dir, name) -> name.startsWith("librocksdbjni") && name.endsWith(".so"));
+        if (rocksSos != null) {
+            for (File rocksSo : rocksSos) {
+                if (!rocksSo.delete()) {
+                    logger.warn("Could not delete existing librocksdbjni*.so file {}", rocksSo);
+                }
+            }
         }
 
         try {
@@ -119,6 +145,7 @@ public class RocksDBMetronome implements Closeable {
             }
             throw t;
         }
+
         Files.createDirectories(storagePath);
 
         forceSyncWriteOptions = new WriteOptions()
@@ -130,36 +157,48 @@ public class RocksDBMetronome implements Closeable {
                 .setSync(false);
 
         try (final DBOptions dbOptions = new DBOptions()
+                .setAccessHintOnCompactionStart(AccessHint.SEQUENTIAL)
+                .setAdviseRandomOnOpen(adviseRandomOnOpen)
+                .setAllowMmapWrites(false) // required to be false for RocksDB.syncWal() to work
                 .setCreateIfMissing(createIfMissing)
                 .setCreateMissingColumnFamilies(createMissingColumnFamilies)
-                .setLogger(getRocksLogger())
+                .setDelayedWriteRate(delayedWriteRate)
                 .setIncreaseParallelism(parallelThreads)
-                .setMaxBackgroundFlushes(maxBackgroundFlushes)
+                .setLogger(getRocksLogger())
                 .setMaxBackgroundCompactions(maxBackgroundCompactions)
-                .setAdviseRandomOnOpen(adviseRandomOnOpen)
-                .setAccessHintOnCompactionStart(AccessHint.SEQUENTIAL)
+                .setMaxBackgroundFlushes(maxBackgroundFlushes)
+                .setMaxTotalWalSize(maxTotalWalSize)
+                .setUseFsync(useFsync)
                 .setStatsDumpPeriodSec(statDumpSeconds)
-                .setDelayedWriteRate(delayedWriteRate);
+             ;
 
              final ColumnFamilyOptions cfOptions = new ColumnFamilyOptions()
                      .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                     .setWriteBufferSize(writeBufferSize)
                      .setMaxWriteBufferNumber(maxWriteBufferNumber)
                      .setMinWriteBufferNumberToMerge(minWriteBufferNumberToMerge)
                      .setLevel0SlowdownWritesTrigger(level0SlowdownWritesTrigger)
                      .setLevel0StopWritesTrigger(level0StopWritesTrigger)
+                     .setWriteBufferSize(writeBufferSize)
         ) {
-            List<ColumnFamilyDescriptor> familyDescriptors = new ArrayList<>(3);
-            familyDescriptors.add(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfOptions));
-            familyDescriptors.add(new ColumnFamilyDescriptor(CONFIGURATION_FAMILY, cfOptions));
-            familyDescriptors.add(new ColumnFamilyDescriptor(RECORDS_FAMILY, cfOptions));
 
-            final List<ColumnFamilyHandle> columnFamilyList = new ArrayList<>(familyDescriptors.size());
+            // create family descriptors
+            List<ColumnFamilyDescriptor> familyDescriptors = new ArrayList<>(columnFamilyNames.size());
+            for (byte[] name : columnFamilyNames) {
+                familyDescriptors.add(new ColumnFamilyDescriptor(name, cfOptions));
+            }
+
+            List<ColumnFamilyHandle> columnFamilyList = new ArrayList<>(columnFamilyNames.size());
+
             db = RocksDB.open(dbOptions, storagePath.toString(), familyDescriptors, columnFamilyList);
 
-            defaultColumnFamilyHandle = columnFamilyList.get(0);
-            configurationColumnFamilyHandle = columnFamilyList.get(1);
-            recordsColumnFamilyHandle = columnFamilyList.get(2);
+            // create the map of names to handles
+            for (ColumnFamilyHandle cf : columnFamilyList) {
+                columnFamilyHandles.put(new String(cf.getName(), StandardCharsets.UTF_8), cf);
+            }
+
+            // set specific special handles
+            configurationColumnFamilyHandle = columnFamilyHandles.get(CONFIGURATION_FAMILY);
+            recordsColumnFamilyHandle = columnFamilyHandles.get(RECORDS_FAMILY);
 
         } catch (RocksDBException e) {
             throw new IOException(e);
@@ -169,9 +208,8 @@ public class RocksDBMetronome implements Closeable {
             syncExecutor.scheduleWithFixedDelay(this::doSync, minSyncDelayMillis, minSyncDelayMillis, TimeUnit.MILLISECONDS);
         }
 
-        logger.info("Initialized at {}", storagePath);
+        logger.info("Initialized RocksDB Repository at {}", storagePath);
     }
-
 
     public byte[] getConfiguration(final byte[] key) throws RocksDBException {
         return db.get(configurationColumnFamilyHandle, key);
@@ -181,30 +219,53 @@ public class RocksDBMetronome implements Closeable {
         db.put(configurationColumnFamilyHandle, forceSyncWriteOptions, key, value);
     }
 
+    public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
+        db.put(columnFamilyHandle, getWriteOptions(forceSync), key, value);
+    }
+
+    public void put(final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
+        db.put(recordsColumnFamilyHandle, getWriteOptions(forceSync), key, value);
+    }
+
     public byte[] get(final byte[] key) throws RocksDBException {
         return db.get(recordsColumnFamilyHandle, key);
+    }
+
+    public byte[] get(final ColumnFamilyHandle columnFamilyHandle, final byte[] key) throws RocksDBException {
+        return db.get(columnFamilyHandle, key);
     }
 
     public void put(final byte[] key, final byte[] value) throws RocksDBException {
         db.put(recordsColumnFamilyHandle, noSyncWriteOptions, key, value);
     }
 
-    public void put(final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
-        if (forceSync) {
-            db.put(recordsColumnFamilyHandle, forceSyncWriteOptions, key, value);
-        } else {
-            db.put(recordsColumnFamilyHandle, noSyncWriteOptions, key, value);
-        }
+    public void delete(byte[] key) throws RocksDBException {
+        db.delete(recordsColumnFamilyHandle, key);
+    }
+
+    public void delete(final ColumnFamilyHandle columnFamilyHandle, byte[] key) throws RocksDBException {
+        db.delete(columnFamilyHandle, key);
+    }
+
+    public void delete(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final boolean forceSync) throws RocksDBException {
+        db.delete(columnFamilyHandle, getWriteOptions(forceSync), key);
+    }
+
+    private WriteOptions getWriteOptions(boolean forceSync) {
+        return forceSync ? forceSyncWriteOptions : noSyncWriteOptions;
     }
 
     public RocksIterator recordIterator() {
         return db.newIterator(recordsColumnFamilyHandle);
     }
 
-    public void forceSync() throws RocksDBException {
-        db.put(recordsColumnFamilyHandle, forceSyncWriteOptions, ZERO_BYTE, ZERO_BYTE); // this forces the WAL to disk
+    public RocksIterator getIterator(final ColumnFamilyHandle columnFamilyHandle) {
+        return db.newIterator(columnFamilyHandle);
     }
 
+    public void forceSync() throws RocksDBException {
+        db.syncWal();
+    }
 
     public int getSyncCounterValue() {
         return syncCounter.get();
@@ -213,12 +274,12 @@ public class RocksDBMetronome implements Closeable {
     /**
      * Close the Metronome and the RocksDB Objects
      *
-     * @throws IOException - if there are issues in closing any of the underlyingRocksDB objects
+     * @throws IOException if there are issues in closing any of the underlying RocksDB objects
      */
     @Override
     public void close() throws IOException {
 
-        //syncing here so we don't close the db while doSync() might be using it
+        // syncing here so we don't close the db while doSync() might be using it
         syncLock.lock();
         try {
             if (syncExecutor != null) {
@@ -231,9 +292,9 @@ public class RocksDBMetronome implements Closeable {
             safeClose(noSyncWriteOptions, exceptionReference);
 
             // close the column family handles first, then the db last
-            safeClose(defaultColumnFamilyHandle, exceptionReference);
-            safeClose(configurationColumnFamilyHandle, exceptionReference);
-            safeClose(recordsColumnFamilyHandle, exceptionReference);
+            for (ColumnFamilyHandle cfh : columnFamilyHandles.values()) {
+                safeClose(cfh, exceptionReference);
+            }
             safeClose(db, exceptionReference);
 
             if (exceptionReference.get() != null) {
@@ -245,8 +306,8 @@ public class RocksDBMetronome implements Closeable {
     }
 
     /**
-     * @param autoCloseable      - An {@link AutoCloseable} to be closed
-     * @param exceptionReference - A reference to contain any encountered {@link Exception}
+     * @param autoCloseable      An {@link AutoCloseable} to be closed
+     * @param exceptionReference A reference to contain any encountered {@link Exception}
      */
     private void safeClose(final AutoCloseable autoCloseable, final AtomicReference<Exception> exceptionReference) {
         if (autoCloseable != null) {
@@ -258,10 +319,18 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * @return The capacity of the store
+     * @throws IOException if encountered
+     */
     public long getStorageCapacity() throws IOException {
         return Files.getFileStore(storagePath).getTotalSpace();
     }
 
+    /**
+     * @return The usable space of the store
+     * @throws IOException if encountered
+     */
     public long getUsableStorageSpace() throws IOException {
         return Files.getFileStore(storagePath).getUsableSpace();
     }
@@ -275,11 +344,17 @@ public class RocksDBMetronome implements Closeable {
     private void doSync() {
         syncLock.lock();
         try {
+            // if we're interrupted, return
+            if (Thread.currentThread().isInterrupted()) {
+                return;
+            }
             forceSync();
             syncCounter.incrementAndGet(); // its ok if it rolls over... we're just going to check that the value changed
             syncCondition.signalAll();
-        } catch (final Throwable t) { // normally shouldn't catch Throwable, but we don't want to suppress future executions due to a potentially transient issue
-            logger.error("Unable to sync due to " + t.toString(), t);
+        } catch (final IllegalArgumentException e) {
+            logger.error("Unable to sync, likely because the repository is out of space.", e);
+        } catch (final Throwable t) {
+            logger.error("Unable to sync", t);
         } finally {
             syncLock.unlock();
         }
@@ -296,16 +371,16 @@ public class RocksDBMetronome implements Closeable {
     /**
      * This method blocks until the WAL has been forced to disk, ensuring that all records written before the point specified by the counterValue have been persisted.
      *
-     * @param counterValue - The value of the counter at the time of a write we must persist
+     * @param counterValue The value of the counter at the time of a write we must persist
+     * @throws InterruptedException if the thread is interrupted
      */
     private void waitForSync(final int counterValue) throws InterruptedException {
         if (counterValue != syncCounter.get()) {
-            return; // the counter has already changed, meaning the records we're concerned with have already been persisted
+            return; // if the counter has already changed, we don't need to wait (or grab the lock) because the records we're concerned with have already been persisted
         }
         long waitTimeRemaining = syncWarningNanos;
         syncLock.lock();
         try {
-
             while (counterValue == syncCounter.get()) {  // wait until the counter changes (indicating sync occurred)
                 waitTimeRemaining = syncCondition.awaitNanos(waitTimeRemaining);
                 if (waitTimeRemaining <= 0L) { // this means the wait timed out
@@ -327,10 +402,16 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
-    private Path getStoragePath() {
+    /**
+     * @return the storage path of rocks db
+     */
+    public Path getStoragePath() {
         return storagePath;
     }
 
+    /**
+     * @return A RocksDB logger capturing all logging output from RocksDB
+     */
     private org.rocksdb.Logger getRocksLogger() {
         try (Options options = new Options()
                 // make RocksDB give us everything, and we'll decide what we want to log in our wrapper
@@ -342,7 +423,6 @@ public class RocksDBMetronome implements Closeable {
     /**
      * An Extension of org.rocksdb.Logger that wraps the slf4j Logger
      */
-
     private class LogWrapper extends org.rocksdb.Logger {
 
         LogWrapper(Options options) {
@@ -352,20 +432,18 @@ public class RocksDBMetronome implements Closeable {
         @Override
         protected void log(final InfoLogLevel infoLogLevel, final String logMsg) {
             switch (infoLogLevel) {
+                case ERROR_LEVEL:
+                case FATAL_LEVEL:
+                    logger.error(logMsg);
+                    break;
+                case WARN_LEVEL:
+                    logger.warn(logMsg);
+                    break;
                 case DEBUG_LEVEL:
                     logger.debug(logMsg);
                     break;
                 case INFO_LEVEL:
                 case HEADER_LEVEL:
-                    logger.info(logMsg);
-                    break;
-                case WARN_LEVEL:
-                    logger.warn(logMsg);
-                    break;
-                case ERROR_LEVEL:
-                case FATAL_LEVEL:
-                    logger.error(logMsg);
-                    break;
                 default:
                     logger.info(logMsg);
                     break;
@@ -385,19 +463,37 @@ public class RocksDBMetronome implements Closeable {
         int maxBackgroundFlushes = 1;
         int maxBackgroundCompactions = 1;
         int statDumpSeconds = 600;
-        long minSyncDelayMillis;
+        long minSyncDelayMillis = 10;
         long syncWarningNanos = TimeUnit.SECONDS.toNanos(30);
         Path storagePath;
         boolean adviseRandomOnOpen = false;
         boolean createIfMissing = true;
         boolean createMissingColumnFamilies = true;
+        boolean useFsync = true;
         boolean automaticSyncEnabled = true;
+        final Set<byte[]> columnFamilyNames = new HashSet<>();
 
         public RocksDBMetronome build() {
             if (storagePath == null) {
                 throw new IllegalStateException("Cannot create RocksDBMetronome because storagePath is not set");
             }
+
+            // add default column families
+            columnFamilyNames.add(RocksDB.DEFAULT_COLUMN_FAMILY);
+            columnFamilyNames.add(CONFIGURATION_FAMILY.getBytes(StandardCharsets.UTF_8));
+            columnFamilyNames.add(RECORDS_FAMILY.getBytes(StandardCharsets.UTF_8));
+
             return new RocksDBMetronome(this);
+        }
+
+        public Builder addColumnFamily(String name) {
+            this.columnFamilyNames.add(name.getBytes(StandardCharsets.UTF_8));
+            return this;
+        }
+
+        public Builder setStoragePath(Path storagePath) {
+            this.storagePath = storagePath;
+            return this;
         }
 
         public Builder setParallelThreads(int parallelThreads) {
@@ -460,18 +556,9 @@ public class RocksDBMetronome implements Closeable {
             return this;
         }
 
-        public Builder setStoragePath(Path storagePath) {
-            this.storagePath = storagePath;
-            return this;
-        }
 
         public Builder setAdviseRandomOnOpen(boolean adviseRandomOnOpen) {
             this.adviseRandomOnOpen = adviseRandomOnOpen;
-            return this;
-        }
-
-        public Builder setCreateIfMissing(boolean createIfMissing) {
-            this.createIfMissing = createIfMissing;
             return this;
         }
 
@@ -480,9 +567,23 @@ public class RocksDBMetronome implements Closeable {
             return this;
         }
 
+        public Builder setCreateIfMissing(boolean createIfMissing) {
+            this.createIfMissing = createIfMissing;
+            return this;
+        }
+
+       public Builder setUseFsync(boolean useFsync) {
+            this.useFsync = useFsync;
+            return this;
+        }
+
         public Builder setAutomaticSyncEnabled(boolean automaticSyncEnabled) {
             this.automaticSyncEnabled = automaticSyncEnabled;
             return this;
+        }
+
+        long getMaxTotalWalSize() {
+            return writeBufferSize * maxWriteBufferNumber;
         }
     }
 }
