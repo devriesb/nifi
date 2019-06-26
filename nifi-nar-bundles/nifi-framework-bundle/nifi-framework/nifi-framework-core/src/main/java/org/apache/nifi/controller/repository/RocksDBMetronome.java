@@ -3,7 +3,6 @@ package org.apache.nifi.controller.repository;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -79,8 +78,7 @@ public class RocksDBMetronome implements Closeable {
     private WriteOptions forceSyncWriteOptions;
     private WriteOptions noSyncWriteOptions;
 
-
-    public RocksDBMetronome(Builder builder) {
+    private RocksDBMetronome(Builder builder) {
         statDumpSeconds = builder.statDumpSeconds;
         parallelThreads = builder.parallelThreads;
         maxWriteBufferNumber = builder.maxWriteBufferNumber;
@@ -572,7 +570,7 @@ public class RocksDBMetronome implements Closeable {
             return this;
         }
 
-       public Builder setUseFsync(boolean useFsync) {
+        public Builder setUseFsync(boolean useFsync) {
             this.useFsync = useFsync;
             return this;
         }
