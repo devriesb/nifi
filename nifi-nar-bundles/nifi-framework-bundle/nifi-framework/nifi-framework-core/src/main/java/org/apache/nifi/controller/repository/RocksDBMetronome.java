@@ -115,7 +115,7 @@ public class RocksDBMetronome implements Closeable {
      */
     public void initialize() throws IOException {
 
-        final String rocksSharedLibDir = System.getenv("ROCKSDB_SHAREDLIB_DIR").trim();
+        final String rocksSharedLibDir = System.getenv("ROCKSDB_SHAREDLIB_DIR");
         final String javaTmpDir = System.getProperty("java.io.tmpdir");
         final String libDir = !StringUtils.isBlank(rocksSharedLibDir) ? rocksSharedLibDir : javaTmpDir;
         try {
@@ -372,7 +372,7 @@ public class RocksDBMetronome implements Closeable {
      * @param counterValue The value of the counter at the time of a write we must persist
      * @throws InterruptedException if the thread is interrupted
      */
-    private void waitForSync(final int counterValue) throws InterruptedException {
+    public void waitForSync(final int counterValue) throws InterruptedException {
         if (counterValue != syncCounter.get()) {
             return; // if the counter has already changed, we don't need to wait (or grab the lock) because the records we're concerned with have already been persisted
         }
@@ -398,6 +398,37 @@ public class RocksDBMetronome implements Closeable {
         } finally {
             syncLock.unlock();
         }
+    }
+
+    public static byte[] getBytes(long value) {
+        byte[] bytes = new byte[8];
+        writeLong(value, bytes);
+        return bytes;
+    }
+
+    public static void writeLong(long l, byte[] bytes) {
+        bytes[0] = (byte) (l >>> 56);
+        bytes[1] = (byte) (l >>> 48);
+        bytes[2] = (byte) (l >>> 40);
+        bytes[3] = (byte) (l >>> 32);
+        bytes[4] = (byte) (l >>> 24);
+        bytes[5] = (byte) (l >>> 16);
+        bytes[6] = (byte) (l >>> 8);
+        bytes[7] = (byte) (l);
+    }
+
+    public static long readLong(final byte[] bytes) throws IOException {
+        if (bytes.length != 8) {
+            throw new IOException("wrong number of bytes to convert to long (must be 8)");
+        }
+        return (((long) (bytes[0]) << 56) +
+                ((long) (bytes[1] & 255) << 48) +
+                ((long) (bytes[2] & 255) << 40) +
+                ((long) (bytes[3] & 255) << 32) +
+                ((long) (bytes[4] & 255) << 24) +
+                ((long) (bytes[5] & 255) << 16) +
+                ((long) (bytes[6] & 255) << 8) +
+                ((long) (bytes[7] & 255)));
     }
 
     /**
