@@ -24,24 +24,20 @@ import org.apache.nifi.controller.repository.claim.ResourceClaimManager;
 import org.apache.nifi.processor.DataUnit;
 import org.apache.nifi.util.FormatUtils;
 import org.apache.nifi.util.NiFiProperties;
-import org.apache.nifi.wali.SequentialAccessWriteAheadLog;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.wali.MinimalLockingWriteAheadLog;
 import org.wali.SerDe;
-import org.wali.SyncListener;
 import org.wali.UpdateType;
-import org.wali.WriteAheadRepository;
-import sun.awt.image.ImageWatched;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.File;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,21 +53,14 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -92,6 +81,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
     private static final String FLOWFILE_PROPERTY_PREFIX = "nifi.flowfile.repository.";
     private static final String FLOWFILE_REPOSITORY_DIRECTORY_PREFIX = FLOWFILE_PROPERTY_PREFIX + "directory";
 
+    private static final byte[] SWAP_LOCATION_SUFFIX_KEY = "swap.location.sufixes".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SERIALIZATION_ENCODING_KEY = "serial.encoding".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SERIALIZATION_HEADER_KEY = "serial.header".getBytes(StandardCharsets.UTF_8);
     private static final byte[] REPOSITORY_VERSION_KEY = "repository.version".getBytes(StandardCharsets.UTF_8);
@@ -203,7 +193,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
          * @return The property value as a percent
          */
         double getPercentValue(NiFiProperties niFiProperties) {
-            String propertyValue = niFiProperties.getProperty(this.propertyName, this.defaultValue).replace('%',' ');
+            String propertyValue = niFiProperties.getProperty(this.propertyName, this.defaultValue).replace('%', ' ');
             double returnValue = 0.0D;
             try {
                 returnValue = Double.parseDouble(propertyValue) / 100D;
@@ -400,7 +390,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                 serializer = serdeFactory.createSerDe(serializationEncodingName);
             }
 
-            serializationHeader = db.getConfiguration(SERIALIZATION_ENCODING_KEY);
+            serializationHeader = db.getConfiguration(SERIALIZATION_HEADER_KEY);
 
             if (serializationHeader == null) {
                 try (
@@ -412,7 +402,19 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                     db.putConfiguration(SERIALIZATION_HEADER_KEY, serializationHeader);
                 }
             }
-        } catch (RocksDBException e) {
+
+
+            byte[] swapLocationSuffixBytes = db.getConfiguration(SWAP_LOCATION_SUFFIX_KEY);
+            if (swapLocationSuffixBytes != null) {
+                try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(swapLocationSuffixBytes);
+                     ObjectInputStream objectInputStream = new ObjectInputStream(byteArrayInputStream)) {
+                    Object o = objectInputStream.readObject();
+                    if (o instanceof Collection) {
+                        swapLocationSuffixes.addAll((Collection) o);
+                    }
+                }
+            }
+        } catch (RocksDBException | ClassNotFoundException e) {
             throw new IOException(e);
         }
 
@@ -668,6 +670,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         if (record.getType() != RepositoryRecordType.DELETE
                 && record.getType() != RepositoryRecordType.CONTENTMISSING
                 && record.getType() != RepositoryRecordType.CLEANUP_TRANSIENT_CLAIMS
+                && record.getType() != RepositoryRecordType.SWAP_OUT
                 && record.getDestination() == null) {
             throw new IllegalArgumentException("Record " + record + " has no destination and Type is " + record.getType());
         }
@@ -740,7 +743,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
     }
 
-    private void determineDestructibleClaims(Collection<RepositoryRecord> records) {
+    private void determineDestructibleClaims(Collection<RepositoryRecord> records) throws IOException {
 
         final Set<ResourceClaim> claimsToAdd = new HashSet<>();
         final Set<String> swapLocationsAdded = new HashSet<>();
@@ -763,14 +766,16 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                 if (shouldDestroyOriginal(record)) {
                     claimsToAdd.add(record.getOriginalClaim().getResourceClaim());
                 }
-            }else if (record.getType() == RepositoryRecordType.SWAP_OUT) {
+            } else if (record.getType() == RepositoryRecordType.SWAP_OUT) {
                 final String swapLocation = record.getSwapLocation();
-                swapLocationsAdded.add(swapLocation);
-                swapLocationsRemoved.remove(swapLocation);
+                final String normalizedSwapLocation = normalizeSwapLocation(swapLocation);
+                swapLocationsAdded.add(normalizedSwapLocation);
+                swapLocationsRemoved.remove(normalizedSwapLocation);
             } else if (record.getType() == RepositoryRecordType.SWAP_IN) {
                 final String swapLocation = record.getSwapLocation();
-                swapLocationsRemoved.add(swapLocation);
-                swapLocationsAdded.remove(swapLocation);
+                final String normalizedSwapLocation = normalizeSwapLocation(swapLocation);
+                swapLocationsRemoved.add(normalizedSwapLocation);
+                swapLocationsAdded.remove(normalizedSwapLocation);
             }
 
             final List<ContentClaim> transientClaims = record.getTransientClaims();
@@ -786,8 +791,8 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         // If we have swapped files in or out, we need to ensure that we update our swapLocationSuffixes.
         if (!swapLocationsAdded.isEmpty() || !swapLocationsRemoved.isEmpty()) {
             synchronized (swapLocationSuffixes) {
-                swapLocationsRemoved.forEach(loc -> swapLocationSuffixes.remove(normalizeSwapLocation(loc)));
-                swapLocationsAdded.forEach(loc -> swapLocationSuffixes.add(normalizeSwapLocation(loc)));
+                removeNormalizedSwapLocations(swapLocationsRemoved);
+                addNormalizedSwapLocations(swapLocationsAdded);
             }
         }
 
@@ -868,8 +873,9 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
 
     @Override
     public boolean isValidSwapLocationSuffix(final String swapLocationSuffix) {
+        String normalizedSwapLocation = normalizeSwapLocation(swapLocationSuffix);
         synchronized (swapLocationSuffixes) {
-            return swapLocationSuffixes.contains(normalizeSwapLocation(swapLocationSuffix));
+            return swapLocationSuffixes.contains(normalizedSwapLocation);
         }
     }
 
@@ -920,11 +926,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
 
         updateRepository(repoRecords);
-
-        synchronized (this.swapLocationSuffixes) {
-            this.swapLocationSuffixes.add(normalizeSwapLocation(swapLocation));
-        }
-
+        addUnnormalizedSwapLocation(swapLocation);
         logger.info("Successfully swapped out {} FlowFiles from {} to Swap File {}", new Object[]{swappedOut.size(), queue, swapLocation});
     }
 
@@ -942,29 +944,8 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
 
         updateRepository(repoRecords);
-
-        synchronized (this.swapLocationSuffixes) {
-            this.swapLocationSuffixes.add(normalizeSwapLocation(swapLocation));
-        }
-
+        removeUnnormalizedSwapLocation(swapLocation);
         logger.info("Repository updated to reflect that {} FlowFiles were swapped in to {}", new Object[]{swapRecords.size(), queue});
-    }
-
-    private void deleteRecursively(final File dir) {
-        final File[] children = dir.listFiles();
-
-        if (children != null) {
-            for (final File child : children) {
-                final boolean deleted = child.delete();
-                if (!deleted) {
-                    logger.warn("Failed to delete old file {}; this file should be cleaned up manually", child);
-                }
-            }
-        }
-
-        if (!dir.delete()) {
-            logger.warn("Failed to delete old directory {}; this directory should be cleaned up manually", dir);
-        }
     }
 
 
@@ -1031,7 +1012,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                                 localMaxId = recordId;
                             }
 
-                            if(record.getType().equals(RepositoryRecordType.SWAP_OUT)){
+                            if (record.getType().equals(RepositoryRecordType.SWAP_OUT)) {
                                 localRecoveredSwapLocations.add(normalizeSwapLocation(record.getSwapLocation()));
                             }
 
@@ -1071,9 +1052,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                     }
                 }
                 recordCount.addAndGet(localRecordCount);
-                synchronized (this.swapLocationSuffixes) {
-                    this.swapLocationSuffixes.addAll(localRecoveredSwapLocations);
-                }
+                addNormalizedSwapLocations(localRecoveredSwapLocations);
                 return localMaxId;
 
             }));
@@ -1137,7 +1116,11 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                 getInMemoryFlowFiles(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime),
                 deserializationThreads);
-        logger.debug("Recovered {} Swap Files: {}", swapLocationSuffixes.size(), swapLocationSuffixes);
+        if (logger.isDebugEnabled()) {
+            synchronized (this.swapLocationSuffixes) {
+                logger.debug("Recovered {} Swap Files: {}", swapLocationSuffixes.size(), swapLocationSuffixes);
+            }
+        }
         if (numFlowFilesMissingQueue.get() > 0) {
             logger.warn("On recovery, found {} FlowFiles whose queue no longer exists.  These FlowFiles have been dropped.", numFlowFilesMissingQueue);
         }
@@ -1155,6 +1138,48 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
 
         return maxId;
+    }
+
+
+    private void addUnnormalizedSwapLocation(String unnormalizedSwapLocation) throws IOException {
+        addUnnormalizedSwapLocations(Collections.singleton(unnormalizedSwapLocation));
+    }
+
+    private void addUnnormalizedSwapLocations(Collection<String> unnormalizedSwapLocations) throws IOException {
+        addNormalizedSwapLocations(unnormalizedSwapLocations.stream().map(RocksDBFlowFileRepository::normalizeSwapLocation).collect(Collectors.toSet()));
+    }
+
+    private void addNormalizedSwapLocations(Collection<String> normalizedSwapLocations) throws IOException {
+        synchronized (this.swapLocationSuffixes) {
+            this.swapLocationSuffixes.addAll(normalizedSwapLocations);
+            persistSwapLocationSuffixes();
+        }
+    }
+
+    private void removeUnnormalizedSwapLocation(String unnormalizedSwapLocation) throws IOException {
+        removeUnnormalizedSwapLocations(Collections.singleton(unnormalizedSwapLocation));
+    }
+
+    private void removeUnnormalizedSwapLocations(Collection<String> unnormalizedSwapLocations) throws IOException {
+        removeNormalizedSwapLocations(unnormalizedSwapLocations.stream().map(RocksDBFlowFileRepository::normalizeSwapLocation).collect(Collectors.toSet()));
+    }
+
+    private void removeNormalizedSwapLocations(Collection<String> normalizedSwapLocations) throws IOException {
+        synchronized (this.swapLocationSuffixes) {
+            this.swapLocationSuffixes.removeAll(normalizedSwapLocations);
+            persistSwapLocationSuffixes();
+        }
+    }
+
+    private void persistSwapLocationSuffixes() throws IOException {
+        try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+             ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteArrayOutputStream);
+        ) {
+            objectOutputStream.writeObject(swapLocationSuffixes);
+            db.putConfiguration(SWAP_LOCATION_SUFFIX_KEY, byteArrayOutputStream.toByteArray());
+        } catch (RocksDBException e) {
+            throw new IOException(e);
+        }
     }
 
 
