@@ -84,8 +84,8 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
     private static final byte[] SWAP_LOCATION_SUFFIX_KEY = "swap.location.sufixes".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SERIALIZATION_ENCODING_KEY = "serial.encoding".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SERIALIZATION_HEADER_KEY = "serial.header".getBytes(StandardCharsets.UTF_8);
-    private static final byte[] REPOSITORY_VERSION_KEY = "repository.version".getBytes(StandardCharsets.UTF_8);
-    private static final byte[] VERSION_ONE_BYTES = "1.0".getBytes(StandardCharsets.UTF_8);
+    static final byte[] REPOSITORY_VERSION_KEY = "repository.version".getBytes(StandardCharsets.UTF_8);
+    static final byte[] VERSION_ONE_BYTES = "1.0".getBytes(StandardCharsets.UTF_8);
     private static final IllegalStateException NO_NEW_FLOWFILES = new IllegalStateException("Repository is not currently accepting new FlowFiles");
     private static final Runtime runtime = Runtime.getRuntime();
     private static final NumberFormat percentFormat = NumberFormat.getPercentInstance();
@@ -343,7 +343,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
      * @param niFiProperties The Properties file
      * @return The path of the repo
      */
-    private Path getFlowFileRepoPath(NiFiProperties niFiProperties) {
+    static Path getFlowFileRepoPath(NiFiProperties niFiProperties) {
         for (final String propertyName : niFiProperties.getPropertyKeys()) {
             if (propertyName.startsWith(FLOWFILE_REPOSITORY_DIRECTORY_PREFIX)) {
                 final String dirName = niFiProperties.getProperty(propertyName);
@@ -485,7 +485,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
     /**
      * Updates the stalled and stopped status of the repository
      */
-    private void updateStallStop() {
+    void updateStallStop() {
         // if stall.stop logic is not enabled, return
         if (!enableStallStop) return;
 
@@ -1110,8 +1110,10 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         // Set the AtomicLong to 1 more than the max ID so that calls to #getNextFlowFileSequence() will
         // return the appropriate number.
         flowFileSequenceGenerator.set(maxId + 1);
-        inMemoryFlowFiles.set(enableRecoveryMode ? recoveryModeFlowFileLimit
-                : recordCount.get() - numFlowFilesMissingQueue.get());
+
+        int flowFilesInQueues = recordCount.get() - numFlowFilesMissingQueue.get();
+        inMemoryFlowFiles.set(!enableRecoveryMode ? flowFilesInQueues
+                : Math.min(flowFilesInQueues, recoveryModeFlowFileLimit));
         logger.info("Successfully restored {} FlowFiles in {} milliseconds using {} threads",
                 getInMemoryFlowFiles(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime),
