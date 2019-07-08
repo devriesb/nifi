@@ -17,7 +17,6 @@ import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.file.FileUtils;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -618,9 +617,9 @@ public class TestRocksDBFlowFileRepository {
             assertTrue(repo.stopNewFlowFiles);
 
             // mark records for delete
-            ((StandardRepositoryRecord)record1.get(0)).markForDelete();
-            ((StandardRepositoryRecord)record2.get(0)).markForDelete();
-            ((StandardRepositoryRecord)record3.get(0)).markForDelete();
+            ((StandardRepositoryRecord) record1.get(0)).markForDelete();
+            ((StandardRepositoryRecord) record2.get(0)).markForDelete();
+            ((StandardRepositoryRecord) record3.get(0)).markForDelete();
 
             // DELETE one... should be stalled but not stopped
             repo.updateRepository(record1);

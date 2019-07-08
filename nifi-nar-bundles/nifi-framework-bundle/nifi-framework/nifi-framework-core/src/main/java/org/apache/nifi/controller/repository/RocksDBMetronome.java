@@ -1,5 +1,22 @@
 package org.apache.nifi.controller.repository;
 
+import org.apache.nifi.processor.DataUnit;
+import org.apache.nifi.util.StringUtils;
+import org.rocksdb.AccessHint;
+import org.rocksdb.ColumnFamilyDescriptor;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.CompressionType;
+import org.rocksdb.DBOptions;
+import org.rocksdb.InfoLogLevel;
+import org.rocksdb.Options;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
+import org.rocksdb.RocksIterator;
+import org.rocksdb.WriteOptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -21,13 +38,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
-
-
-import org.apache.nifi.util.StringUtils;
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
-import org.apache.nifi.processor.DataUnit;
-import org.rocksdb.*;
 
 
 /**
@@ -209,12 +219,20 @@ public class RocksDBMetronome implements Closeable {
         logger.info("Initialized RocksDB Repository at {}", storagePath);
     }
 
+    public ColumnFamilyHandle getColumnFamilyHandle(String familyName) {
+        return columnFamilyHandles.get(familyName);
+    }
+
     public byte[] getConfiguration(final byte[] key) throws RocksDBException {
         return db.get(configurationColumnFamilyHandle, key);
     }
 
     public void putConfiguration(final byte[] key, final byte[] value) throws RocksDBException {
         db.put(configurationColumnFamilyHandle, forceSyncWriteOptions, key, value);
+    }
+
+    public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value) throws RocksDBException {
+        put(columnFamilyHandle, key, value, false);
     }
 
     public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
