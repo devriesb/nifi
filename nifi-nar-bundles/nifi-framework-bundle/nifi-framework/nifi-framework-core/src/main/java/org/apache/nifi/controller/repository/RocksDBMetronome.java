@@ -357,7 +357,7 @@ public class RocksDBMetronome implements Closeable {
      * If the sync is successful, it notifies threads that had been waiting for their records to be persisted using
      * syncCondition and the syncCounter, which is incremented to indicate success
      */
-    private void doSync() {
+    void doSync() {
         syncLock.lock();
         try {
             // if we're interrupted, return
