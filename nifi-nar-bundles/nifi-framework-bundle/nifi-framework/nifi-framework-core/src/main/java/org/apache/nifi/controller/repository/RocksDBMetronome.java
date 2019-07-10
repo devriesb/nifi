@@ -50,8 +50,8 @@ public class RocksDBMetronome implements Closeable {
 
     private static final Logger logger = LoggerFactory.getLogger(RocksDBMetronome.class);
 
-    private static final String CONFIGURATION_FAMILY = "configuration.column.family";
-    private static final String RECORDS_FAMILY = "records.column.family";
+    static final String CONFIGURATION_FAMILY = "configuration.column.family";
+    static final String RECORDS_FAMILY = "records.column.family";
 
     private final AtomicLong lastSyncWarningNanos = new AtomicLong(0L);
     private final int parallelThreads;
@@ -272,7 +272,7 @@ public class RocksDBMetronome implements Closeable {
     }
 
     public RocksIterator recordIterator() {
-        return db.newIterator(recordsColumnFamilyHandle);
+        return getIterator(recordsColumnFamilyHandle);
     }
 
     public RocksIterator getIterator(final ColumnFamilyHandle columnFamilyHandle) {

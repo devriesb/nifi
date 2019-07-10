@@ -75,7 +75,7 @@ public class TestRocksDBMetronome {
     }
 
     @Test
-    public void testPutGet() throws Exception {
+    public void testPutGetDelete() throws Exception {
 
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
                 .setStoragePath(temporaryFolder.newFolder().toPath())
@@ -83,13 +83,39 @@ public class TestRocksDBMetronome {
             db.initialize();
 
             assertNull(db.get(KEY));
+
+            // test default (no sync)
             db.put(KEY, VALUE);
             assertArrayEquals(VALUE, db.get(KEY));
+            db.delete(KEY);
+            assertNull(db.get(KEY));
+
+            // test with "force sync"
+            db.put(KEY, VALUE, true);
+            assertArrayEquals(VALUE, db.get(KEY));
+            db.delete(db.getColumnFamilyHandle(RocksDBMetronome.RECORDS_FAMILY), KEY, true);
+            assertNull(db.get(KEY));
         }
     }
 
     @Test
-    public void testAddColumnFamily() throws Exception {
+    public void testPutGetConfiguration() throws Exception {
+
+        try (RocksDBMetronome db = new RocksDBMetronome.Builder()
+                .setStoragePath(temporaryFolder.newFolder().toPath())
+                .build()) {
+            db.initialize();
+
+            assertNull(db.getConfiguration(KEY));
+            db.putConfiguration(KEY, VALUE);
+            assertArrayEquals(VALUE, db.getConfiguration(KEY));
+            db.delete(db.getColumnFamilyHandle(RocksDBMetronome.CONFIGURATION_FAMILY), KEY);
+            assertNull(db.getConfiguration(KEY));
+        }
+    }
+
+    @Test
+    public void testColumnFamilies() throws Exception {
 
         String secondFamilyName = "second family";
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
@@ -99,20 +125,45 @@ public class TestRocksDBMetronome {
             db.initialize();
             ColumnFamilyHandle secondFamily = db.getColumnFamilyHandle(secondFamilyName);
 
+            // assert nothing present
             assertNull(db.get(KEY));
             assertNull(db.get(KEY_2));
 
             assertNull(db.get(secondFamily, KEY));
             assertNull(db.get(secondFamily, KEY_2));
 
+            // add values
             db.put(KEY, VALUE);
             db.put(secondFamily, KEY_2, VALUE_2);
 
+            // assert values present in correct family
             assertArrayEquals(VALUE, db.get(KEY));
             assertNull(db.get(KEY_2));
 
             assertArrayEquals(VALUE_2, db.get(secondFamily, KEY_2));
             assertNull(db.get(secondFamily, KEY));
+
+            // delete from the "wrong" family
+            db.delete(KEY_2);
+            db.delete(secondFamily, KEY);
+
+            // assert values *still* present in correct family
+            assertArrayEquals(VALUE, db.get(KEY));
+            assertNull(db.get(KEY_2));
+
+            assertArrayEquals(VALUE_2, db.get(secondFamily, KEY_2));
+            assertNull(db.get(secondFamily, KEY));
+
+            // delete from the "right" family
+            db.delete(KEY);
+            db.delete(secondFamily, KEY_2);
+
+            // assert values removed
+            assertNull(db.get(KEY));
+            assertNull(db.get(KEY_2));
+
+            assertNull(db.get(secondFamily, KEY));
+            assertNull(db.get(secondFamily, KEY_2));
         }
     }
 
@@ -170,18 +221,21 @@ public class TestRocksDBMetronome {
                 .build()) {
             db.initialize();
 
-            int counterValue = db.getSyncCounterValue();
-
-            Future<Boolean> future = getWaitForSyncFuture(db, counterValue);
+            Future<Boolean> future = executor.submit(() -> {
+                db.waitForSync();
+                return true;
+            });
 
             // the future should still be blocked waiting for sync to happen
             assertFalse(future.isDone());
 
-            // do the sync (which would normally happen via the db's internal executor)
-            db.doSync();
-
             // give the future time to wake up and complete
             while (!future.isDone()) {
+                // TESTING NOTE: this is inside a loop to address a minor *testing* race condition where our first doSync() could happen before the future runs,
+                // meaning waitForSync() would be left waiting on another doSync() that never comes...
+
+                // do the sync (which would normally happen via the db's internal executor)
+                db.doSync();
                 Thread.sleep(25);
             }
 

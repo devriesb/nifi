@@ -313,8 +313,8 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         recoveryModeFlowFileLimit = RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.getLongValue(niFiProperties);
         if (enableRecoveryMode) {
             logger.warn("The property \"{}\" is currently set to \"true\" and  \"{}\" is set to  \"{}\".  " +
-                            "This means taht only {} FlowFiles will be loaded in to memory from the FlowFile repo at a time, " +
-                            "allowing for recovery of a system encountering OutOfMemory erros (or similar).  " +
+                            "This means that only {} FlowFiles will be loaded in to memory from the FlowFile repo at a time, " +
+                            "allowing for recovery of a system encountering OutOfMemory errors (or similar).  " +
                             "This setting should be reset to \"false\" as soon as recovery is complete.",
                     RocksDbProperty.ENABLE_RECOVERY_MODE.propertyName, RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, recoveryModeFlowFileLimit, recoveryModeFlowFileLimit);
         }
@@ -410,7 +410,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                      ObjectInputStream objectInputStream = new ObjectInputStream(byteArrayInputStream)) {
                     Object o = objectInputStream.readObject();
                     if (o instanceof Collection) {
-                        swapLocationSuffixes.addAll((Collection) o);
+                        ((Collection<?>) o).forEach(obj -> swapLocationSuffixes.add(obj.toString()));
                     }
                 }
             }
@@ -753,7 +753,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
 
             if (record.getType() == RepositoryRecordType.DELETE) {
                 // For any DELETE record that we have, if claim is destructible, mark it so
-                if (isDestructable(record.getCurrentClaim())) {
+                if (isDestructible(record.getCurrentClaim())) {
                     claimsToAdd.add(record.getCurrentClaim().getResourceClaim());
                 }
 
@@ -781,7 +781,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
             final List<ContentClaim> transientClaims = record.getTransientClaims();
             if (transientClaims != null) {
                 for (final ContentClaim transientClaim : transientClaims) {
-                    if (isDestructable(transientClaim)) {
+                    if (isDestructible(transientClaim)) {
                         claimsToAdd.add(transientClaim.getResourceClaim());
                     }
                 }
@@ -833,7 +833,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
      * @param claim to be evaluated
      * @return true if the claim can be destroyed
      */
-    private boolean isDestructable(final ContentClaim claim) {
+    private boolean isDestructible(final ContentClaim claim) {
         if (claim == null) {
             return false;
         }
@@ -852,7 +852,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
      */
     private boolean shouldDestroyOriginal(RepositoryRecord record) {
         final ContentClaim originalClaim = record.getOriginalClaim();
-        return isDestructable(originalClaim) && !originalClaim.equals(record.getCurrentClaim());
+        return isDestructible(originalClaim) && !originalClaim.equals(record.getCurrentClaim());
     }
 
     @Override
@@ -889,8 +889,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         final String withoutTrailing = (normalizedPath.endsWith("/") && normalizedPath.length() > 1) ? normalizedPath.substring(0, normalizedPath.length() - 1) : normalizedPath;
         final String pathRemoved = getLocationSuffix(withoutTrailing);
 
-        final String normalized = StringUtils.substringBefore(pathRemoved, ".");
-        return normalized;
+        return StringUtils.substringBefore(pathRemoved, ".");
     }
 
     private static String getLocationSuffix(final String swapLocation) {
@@ -926,8 +925,8 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
 
         updateRepository(repoRecords);
-        addUnnormalizedSwapLocation(swapLocation);
-        logger.info("Successfully swapped out {} FlowFiles from {} to Swap File {}", new Object[]{swappedOut.size(), queue, swapLocation});
+        addRawSwapLocation(swapLocation);
+        logger.info("Successfully swapped out {} FlowFiles from {} to Swap File {}", swappedOut.size(), queue, swapLocation);
     }
 
     @Override
@@ -944,7 +943,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
 
         updateRepository(repoRecords);
-        removeUnnormalizedSwapLocation(swapLocation);
+        removeRawSwapLocation(swapLocation);
         logger.info("Repository updated to reflect that {} FlowFiles were swapped in to {}", new Object[]{swapRecords.size(), queue});
     }
 
@@ -1143,12 +1142,12 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
     }
 
 
-    private void addUnnormalizedSwapLocation(String unnormalizedSwapLocation) throws IOException {
-        addUnnormalizedSwapLocations(Collections.singleton(unnormalizedSwapLocation));
+    private void addRawSwapLocation(String rawSwapLocation) throws IOException {
+        addRawSwapLocations(Collections.singleton(rawSwapLocation));
     }
 
-    private void addUnnormalizedSwapLocations(Collection<String> unnormalizedSwapLocations) throws IOException {
-        addNormalizedSwapLocations(unnormalizedSwapLocations.stream().map(RocksDBFlowFileRepository::normalizeSwapLocation).collect(Collectors.toSet()));
+    private void addRawSwapLocations(Collection<String> rawSwapLocations) throws IOException {
+        addNormalizedSwapLocations(rawSwapLocations.stream().map(RocksDBFlowFileRepository::normalizeSwapLocation).collect(Collectors.toSet()));
     }
 
     private void addNormalizedSwapLocations(Collection<String> normalizedSwapLocations) throws IOException {
@@ -1158,12 +1157,12 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
     }
 
-    private void removeUnnormalizedSwapLocation(String unnormalizedSwapLocation) throws IOException {
-        removeUnnormalizedSwapLocations(Collections.singleton(unnormalizedSwapLocation));
+    private void removeRawSwapLocation(String rawSwapLocation) throws IOException {
+        removeRawSwapLocations(Collections.singleton(rawSwapLocation));
     }
 
-    private void removeUnnormalizedSwapLocations(Collection<String> unnormalizedSwapLocations) throws IOException {
-        removeNormalizedSwapLocations(unnormalizedSwapLocations.stream().map(RocksDBFlowFileRepository::normalizeSwapLocation).collect(Collectors.toSet()));
+    private void removeRawSwapLocations(Collection<String> rawSwapLocations) throws IOException {
+        removeNormalizedSwapLocations(rawSwapLocations.stream().map(RocksDBFlowFileRepository::normalizeSwapLocation).collect(Collectors.toSet()));
     }
 
     private void removeNormalizedSwapLocations(Collection<String> normalizedSwapLocations) throws IOException {
@@ -1175,7 +1174,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
 
     private void persistSwapLocationSuffixes() throws IOException {
         try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-             ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteArrayOutputStream);
+             ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteArrayOutputStream)
         ) {
             objectOutputStream.writeObject(swapLocationSuffixes);
             db.putConfiguration(SWAP_LOCATION_SUFFIX_KEY, byteArrayOutputStream.toByteArray());
@@ -1206,7 +1205,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
     }
 
     @Override
-    public long getMaxFlowFileIdentifier() throws IOException {
+    public long getMaxFlowFileIdentifier() {
         // flowFileSequenceGenerator is 1 more than the MAX so that we can call #getAndIncrement on the AtomicLong
         return flowFileSequenceGenerator.get() - 1;
     }
