@@ -99,7 +99,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         CLAIM_CLEANUP_PERIOD("rocksdb.claim.cleanup.period", "30 seconds"),
         DESERIALIZATION_THREADS("rocksdb.deserialization.threads", "16"),
         DESERIALIZATION_BUFFER_SIZE("rocksdb.deserialization.buffer.size", "1000"),
-        MIN_SYNC_DELAY_PERIOD("rocksdb.min.sync.delay.period", "10 milliseconds"),
+        SYNC_PERIOD("rocksdb.sync.period", "10 milliseconds"),
         ACCEPT_DATA_LOSS("rocksdb.accept.data.loss", "false"),
         ENABLE_STALL_STOP("rocksdb.enable.stall.stop", "false"),
         STALL_PERIOD("rocksdb.stall.period", "100 milliseconds"),
@@ -329,7 +329,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                 .setLevel0StopWritesTrigger(RocksDbProperty.LEVEL_O_STOP_WRITES_TRIGGER.getIntValue(niFiProperties))
                 .setMaxBackgroundFlushes(RocksDbProperty.MAX_BACKGROUND_FLUSHES.getIntValue(niFiProperties))
                 .setMaxBackgroundCompactions(RocksDbProperty.MAX_BACKGROUND_COMPACTIONS.getIntValue(niFiProperties))
-                .setMinSyncDelayMillis(RocksDbProperty.MIN_SYNC_DELAY_PERIOD.getTimeValue(niFiProperties, TimeUnit.MILLISECONDS))
+                .setSyncMillis(RocksDbProperty.SYNC_PERIOD.getTimeValue(niFiProperties, TimeUnit.MILLISECONDS))
                 .setSyncWarningNanos(RocksDbProperty.SYNC_WARNING_PERIOD.getTimeValue(niFiProperties, TimeUnit.NANOSECONDS))
                 .setStoragePath(getFlowFileRepoPath(niFiProperties))
                 .setAdviseRandomOnOpen(false)

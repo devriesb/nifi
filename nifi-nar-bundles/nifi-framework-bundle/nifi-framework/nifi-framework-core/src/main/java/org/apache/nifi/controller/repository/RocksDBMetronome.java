@@ -81,7 +81,7 @@ public class RocksDBMetronome implements Closeable {
     private final int maxBackgroundFlushes;
     private final int maxBackgroundCompactions;
     private final int statDumpSeconds;
-    private final long minSyncDelayMillis;
+    private final long syncMillis;
     private final long syncWarningNanos;
     private final Path storagePath;
     private final boolean adviseRandomOnOpen;
@@ -116,7 +116,7 @@ public class RocksDBMetronome implements Closeable {
         level0StopWritesTrigger = builder.level0StopWritesTrigger;
         maxBackgroundFlushes = builder.maxBackgroundFlushes;
         maxBackgroundCompactions = builder.maxBackgroundCompactions;
-        minSyncDelayMillis = builder.minSyncDelayMillis;
+        syncMillis = builder.syncMillis;
         syncWarningNanos = builder.syncWarningNanos;
         storagePath = builder.storagePath;
         adviseRandomOnOpen = builder.adviseRandomOnOpen;
@@ -229,7 +229,7 @@ public class RocksDBMetronome implements Closeable {
         }
 
         if (automaticSyncEnabled) {
-            syncExecutor.scheduleWithFixedDelay(this::doSync, minSyncDelayMillis, minSyncDelayMillis, TimeUnit.MILLISECONDS);
+            syncExecutor.scheduleWithFixedDelay(this::doSync, syncMillis, syncMillis, TimeUnit.MILLISECONDS);
         }
 
         logger.info("Initialized RocksDB Repository at {}", storagePath);
@@ -526,7 +526,7 @@ public class RocksDBMetronome implements Closeable {
         int maxBackgroundFlushes = 1;
         int maxBackgroundCompactions = 1;
         int statDumpSeconds = 600;
-        long minSyncDelayMillis = 10;
+        long syncMillis = 10;
         long syncWarningNanos = TimeUnit.SECONDS.toNanos(30);
         Path storagePath;
         boolean adviseRandomOnOpen = false;
@@ -609,8 +609,8 @@ public class RocksDBMetronome implements Closeable {
             return this;
         }
 
-        public Builder setMinSyncDelayMillis(long minSyncDelayMillis) {
-            this.minSyncDelayMillis = minSyncDelayMillis;
+        public Builder setSyncMillis(long syncMillis) {
+            this.syncMillis = syncMillis;
             return this;
         }
 

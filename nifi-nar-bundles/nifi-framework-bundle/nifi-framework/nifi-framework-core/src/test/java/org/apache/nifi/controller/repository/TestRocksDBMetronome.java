@@ -214,7 +214,7 @@ public class TestRocksDBMetronome {
     public void testCounterIncrement() throws Exception {
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
                 .setStoragePath(temporaryFolder.newFolder().toPath())
-                .setMinSyncDelayMillis(Long.MAX_VALUE) // effectively disable the auto-sync
+                .setSyncMillis(Long.MAX_VALUE) // effectively disable the auto-sync
                 .build()) {
             db.initialize();
 
@@ -233,7 +233,7 @@ public class TestRocksDBMetronome {
     public void testWaitForSync() throws Exception {
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
                 .setStoragePath(temporaryFolder.newFolder().toPath())
-                .setMinSyncDelayMillis(Long.MAX_VALUE) // effectively disable the auto-sync
+                .setSyncMillis(Long.MAX_VALUE) // effectively disable the auto-sync
                 .build()) {
             db.initialize();
 
@@ -264,7 +264,7 @@ public class TestRocksDBMetronome {
     public void testWaitForSyncWithValue() throws Exception {
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
                 .setStoragePath(temporaryFolder.newFolder().toPath())
-                .setMinSyncDelayMillis(Long.MAX_VALUE) // effectively disable the auto-sync
+                .setSyncMillis(Long.MAX_VALUE) // effectively disable the auto-sync
                 .build()) {
             db.initialize();
 
