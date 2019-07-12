@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.nifi.controller.repository;
+package org.apache.nifi.rocksdb;
 
 import org.apache.nifi.processor.DataUnit;
 import org.apache.nifi.util.StringUtils;

@@ -30,6 +30,7 @@ import org.apache.nifi.controller.repository.claim.StandardResourceClaimManager;
 import org.apache.nifi.controller.swap.StandardSwapContents;
 import org.apache.nifi.controller.swap.StandardSwapSummary;
 import org.apache.nifi.flowfile.FlowFile;
+import org.apache.nifi.rocksdb.RocksDBMetronome;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.file.FileUtils;
 import org.junit.Before;
@@ -471,9 +472,9 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
 
-        // restore in recovery mode
+        // restore in recovery mode with varying limits
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.ENABLE_RECOVERY_MODE.propertyName, "true");
-        for (int recoveryLimit = 1; recoveryLimit < totalFlowFiles; recoveryLimit++) {
+        for (int recoveryLimit = 0; recoveryLimit < totalFlowFiles; recoveryLimit+=10) {
 
             additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(recoveryLimit));
             try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
@@ -481,6 +482,14 @@ public class TestRocksDBFlowFileRepository {
                 repo.loadFlowFiles(queueProvider);
                 assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
             }
+        }
+
+        // restore in recovery mode with limit equal to available files
+        additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(totalFlowFiles));
+        try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
+            repo.initialize(new StandardResourceClaimManager());
+            repo.loadFlowFiles(queueProvider);
+            assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
 
         // restore in recovery mode with limit higher than available files
@@ -493,7 +502,7 @@ public class TestRocksDBFlowFileRepository {
 
         // restore in normal mode
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.ENABLE_RECOVERY_MODE.propertyName, "false");
-        additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(1));
+        additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(0));
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
