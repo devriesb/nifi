@@ -130,6 +130,29 @@ public class TestRocksDBMetronome {
         }
     }
 
+    @Test (expected = NullPointerException.class)
+    public void testPutBeforeInit() throws Exception {
+
+        try (RocksDBMetronome db = new RocksDBMetronome.Builder()
+                .setStoragePath(temporaryFolder.newFolder().toPath())
+                .build()) {
+            db.put(KEY, VALUE);
+        }
+    }
+
+    @Test (expected = NullPointerException.class)
+    public void testPutClosed() throws Exception {
+
+        try (RocksDBMetronome db = new RocksDBMetronome.Builder()
+                .setStoragePath(temporaryFolder.newFolder().toPath())
+                .build()) {
+            db.initialize();
+
+            db.close();
+            db.put(KEY_2, VALUE_2);
+        }
+    }
+
     @Test
     public void testColumnFamilies() throws Exception {
 

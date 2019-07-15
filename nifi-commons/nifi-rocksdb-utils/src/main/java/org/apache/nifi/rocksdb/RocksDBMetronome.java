@@ -311,14 +311,28 @@ public class RocksDBMetronome implements Closeable {
     @Override
     public void close() throws IOException {
 
+        logger.info("Closing RocksDBMetronome");
+
         // syncing here so we don't close the db while doSync() might be using it
         syncLock.lock();
         try {
-            if (syncExecutor != null) {
-                syncExecutor.shutdownNow();
+            logger.info("Shutting down RocksDBMetronome sync executor");
+            syncExecutor.shutdownNow();
+
+            // don't allow any possible access to db during closing
+            RocksDB dbToClose = db;
+            db = null;
+
+            try {
+                logger.info("Pausing RocksDB background work");
+                dbToClose.pauseBackgroundWork();
+            } catch (RocksDBException e) {
+                logger.warn("Unable to pause background work before close.", e);
             }
 
             final AtomicReference<Exception> exceptionReference = new AtomicReference<>();
+
+            logger.info("Closing RocksDB configurations");
 
             safeClose(forceSyncWriteOptions, exceptionReference);
             safeClose(noSyncWriteOptions, exceptionReference);
@@ -327,7 +341,9 @@ public class RocksDBMetronome implements Closeable {
             for (ColumnFamilyHandle cfh : columnFamilyHandles.values()) {
                 safeClose(cfh, exceptionReference);
             }
-            safeClose(db, exceptionReference);
+
+            logger.info("Closing RocksDB database");
+            safeClose(dbToClose, exceptionReference);
 
             if (exceptionReference.get() != null) {
                 throw new IOException(exceptionReference.get());

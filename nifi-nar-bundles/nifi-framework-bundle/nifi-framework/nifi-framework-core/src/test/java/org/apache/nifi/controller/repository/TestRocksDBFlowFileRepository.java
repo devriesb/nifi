@@ -33,12 +33,16 @@ import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.rocksdb.RocksDBMetronome;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.file.FileUtils;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.junit.rules.TestName;
 import org.mockito.Mockito;
 import org.mockito.stubbing.Answer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -60,6 +64,7 @@ import java.util.stream.Collectors;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,28 +73,39 @@ import static org.mockito.Mockito.when;
 
 public class TestRocksDBFlowFileRepository {
 
+    private static final Logger logger = LoggerFactory.getLogger(TestRocksDBFlowFileRepository.class);
 
     private final Map<String, String> additionalProperties = new HashMap<>();
     private String nifiPropertiesPath;
 
     @Rule
+    public TestName testName = new TestName();
+
+    @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Before
-    public void createRepo() throws IOException {
-        File testRepo = temporaryFolder.newFolder();
-        additionalProperties.put(NiFiProperties.FLOWFILE_REPOSITORY_DIRECTORY, testRepo.getAbsolutePath());
+    public void before() throws IOException {
+        File testRepoDir = temporaryFolder.newFolder(testName.getMethodName());
+        additionalProperties.put(NiFiProperties.FLOWFILE_REPOSITORY_DIRECTORY, testRepoDir.getAbsolutePath());
 
         File properties = temporaryFolder.newFile();
         Files.copy(Paths.get("src/test/resources/conf/nifi.properties"), properties.toPath(), StandardCopyOption.REPLACE_EXISTING);
         nifiPropertiesPath = properties.getAbsolutePath();
+
+        logger.info("Running test: {}", testName.getMethodName());
+    }
+
+    @After
+    public void after() {
+        logger.info("Done running test: {}", testName.getMethodName());
     }
 
     @Test
     public void testNormalizeSwapLocation() {
         assertEquals("/", RocksDBFlowFileRepository.normalizeSwapLocation("/"));
         assertEquals("", RocksDBFlowFileRepository.normalizeSwapLocation(""));
-        assertEquals(null, RocksDBFlowFileRepository.normalizeSwapLocation(null));
+        assertNull(RocksDBFlowFileRepository.normalizeSwapLocation(null));
         assertEquals("test", RocksDBFlowFileRepository.normalizeSwapLocation("test.txt"));
         assertEquals("test", RocksDBFlowFileRepository.normalizeSwapLocation("/test.txt"));
         assertEquals("test", RocksDBFlowFileRepository.normalizeSwapLocation("/tmp/test.txt"));
@@ -361,6 +377,7 @@ public class TestRocksDBFlowFileRepository {
             repo.loadFlowFiles(queueProvider);
             assertEquals(1, repo.getInMemoryFlowFiles());
         }
+
         // restore with empty queue provider (should throw exception)
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
@@ -474,7 +491,7 @@ public class TestRocksDBFlowFileRepository {
 
         // restore in recovery mode with varying limits
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.ENABLE_RECOVERY_MODE.propertyName, "true");
-        for (int recoveryLimit = 0; recoveryLimit < totalFlowFiles; recoveryLimit+=10) {
+        for (int recoveryLimit = 0; recoveryLimit < totalFlowFiles; recoveryLimit += 10) {
 
             additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(recoveryLimit));
             try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
@@ -691,7 +708,7 @@ public class TestRocksDBFlowFileRepository {
 
         private List<Connection> connectionList = new ArrayList<>();
 
-        public void addConnection(final Connection connection) {
+        void addConnection(final Connection connection) {
             this.connectionList.add(connection);
         }
 
@@ -715,7 +732,7 @@ public class TestRocksDBFlowFileRepository {
         }
 
         @Override
-        public String swapOut(List<FlowFileRecord> flowFiles, FlowFileQueue flowFileQueue, final String partitionName) throws IOException {
+        public String swapOut(List<FlowFileRecord> flowFiles, FlowFileQueue flowFileQueue, final String partitionName) {
             Map<String, List<FlowFileRecord>> swapMap = swappedRecords.computeIfAbsent(flowFileQueue, k -> new HashMap<>());
 
             final String location = UUID.randomUUID().toString();
@@ -724,7 +741,7 @@ public class TestRocksDBFlowFileRepository {
         }
 
         @Override
-        public SwapContents peek(String swapLocation, FlowFileQueue flowFileQueue) throws IOException {
+        public SwapContents peek(String swapLocation, FlowFileQueue flowFileQueue) {
             Map<String, List<FlowFileRecord>> swapMap = swappedRecords.get(flowFileQueue);
             if (swapMap == null) {
                 return null;
@@ -736,7 +753,7 @@ public class TestRocksDBFlowFileRepository {
         }
 
         @Override
-        public SwapContents swapIn(String swapLocation, FlowFileQueue flowFileQueue) throws IOException {
+        public SwapContents swapIn(String swapLocation, FlowFileQueue flowFileQueue) {
             Map<String, List<FlowFileRecord>> swapMap = swappedRecords.get(flowFileQueue);
             if (swapMap == null) {
                 return null;
@@ -748,7 +765,7 @@ public class TestRocksDBFlowFileRepository {
         }
 
         @Override
-        public List<String> recoverSwapLocations(FlowFileQueue flowFileQueue, final String partitionName) throws IOException {
+        public List<String> recoverSwapLocations(FlowFileQueue flowFileQueue, final String partitionName) {
             Map<String, List<FlowFileRecord>> swapMap = swappedRecords.get(flowFileQueue);
             if (swapMap == null) {
                 return null;
@@ -758,7 +775,7 @@ public class TestRocksDBFlowFileRepository {
         }
 
         @Override
-        public SwapSummary getSwapSummary(String swapLocation) throws IOException {
+        public SwapSummary getSwapSummary(String swapLocation) {
             List<FlowFileRecord> records = null;
             for (final Map<String, List<FlowFileRecord>> swapMap : swappedRecords.values()) {
                 records = swapMap.get(swapLocation);
@@ -797,12 +814,12 @@ public class TestRocksDBFlowFileRepository {
         }
 
         @Override
-        public Set<String> getSwappedPartitionNames(FlowFileQueue queue) throws IOException {
+        public Set<String> getSwappedPartitionNames(FlowFileQueue queue) {
             return Collections.emptySet();
         }
 
         @Override
-        public String changePartitionName(String swapLocation, String newPartitionName) throws IOException {
+        public String changePartitionName(String swapLocation, String newPartitionName) {
             return swapLocation;
         }
     }
