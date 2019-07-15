@@ -680,7 +680,11 @@ public class TestRocksDBFlowFileRepository {
     private List<RepositoryRecord> getRecordsToDelete(List<RepositoryRecord> createdRecords, List<FlowFileRecord> flowFileCollection) {
         assertNotNull(createdRecords);
         assertNotNull(flowFileCollection);
-        final Collection<Long> inMemoryIds = flowFileCollection.stream().map(FlowFile::getId).collect(Collectors.toList());
+        final Collection<Long> inMemoryIds = new ArrayList<>();
+        for (FlowFileRecord flowFileRecord : flowFileCollection) {
+            Long id = flowFileRecord.getId();
+            inMemoryIds.add(id);
+        }
         return createdRecords.stream().filter(rec -> inMemoryIds.contains(rec.getCurrent().getId())).collect(Collectors.toList());
     }
 
