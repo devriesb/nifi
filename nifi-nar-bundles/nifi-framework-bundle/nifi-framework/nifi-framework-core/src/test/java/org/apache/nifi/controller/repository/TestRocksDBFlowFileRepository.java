@@ -32,7 +32,6 @@ import org.apache.nifi.controller.swap.StandardSwapSummary;
 import org.apache.nifi.rocksdb.RocksDBMetronome;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.file.FileUtils;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -43,10 +42,8 @@ import org.mockito.stubbing.Answer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -94,28 +91,6 @@ public class TestRocksDBFlowFileRepository {
         nifiPropertiesPath = properties.getAbsolutePath();
 
         logger.info("Running test: {}", testName.getMethodName());
-    }
-
-    @After
-    public void after() {
-        logger.info("Done running test: {}", testName.getMethodName());
-    }
-
-    private final ByteArrayOutputStream outContent = new ByteArrayOutputStream();
-    private final ByteArrayOutputStream errContent = new ByteArrayOutputStream();
-    private final PrintStream originalOut = System.out;
-    private final PrintStream originalErr = System.err;
-
-    @Before
-    public void setUpStreams() {
-        System.setOut(new PrintStream(outContent));
-        System.setErr(new PrintStream(errContent));
-    }
-
-    @After
-    public void restoreStreams() {
-        System.setOut(originalOut);
-        System.setErr(originalErr);
     }
 
     @Test
