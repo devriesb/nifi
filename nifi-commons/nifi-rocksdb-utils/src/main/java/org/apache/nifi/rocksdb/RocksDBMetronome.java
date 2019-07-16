@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 
 /**
@@ -96,9 +97,14 @@ public class RocksDBMetronome implements Closeable {
     private final ScheduledExecutorService syncExecutor;
     private final ReentrantLock syncLock = new ReentrantLock();
     private final Condition syncCondition = syncLock.newCondition();
-
     private final AtomicInteger syncCounter = new AtomicInteger(0);
-    private RocksDB db;
+
+    private RocksDB rocksDB = null;
+    private final ReentrantReadWriteLock dbReadWriteLock = new ReentrantReadWriteLock();
+    private final ReentrantReadWriteLock.ReadLock dbReadLock = dbReadWriteLock.readLock();
+    private final ReentrantReadWriteLock.WriteLock dbWriteLock = dbReadWriteLock.writeLock();
+    private volatile boolean closed = false;
+
     private ColumnFamilyHandle configurationColumnFamilyHandle;
     private ColumnFamilyHandle recordsColumnFamilyHandle;
     private WriteOptions forceSyncWriteOptions;
@@ -180,6 +186,8 @@ public class RocksDBMetronome implements Closeable {
                 .setDisableWAL(false)
                 .setSync(false);
 
+
+        dbWriteLock.lock();
         try (final DBOptions dbOptions = new DBOptions()
                 .setAccessHintOnCompactionStart(AccessHint.SEQUENTIAL)
                 .setAdviseRandomOnOpen(adviseRandomOnOpen)
@@ -213,7 +221,7 @@ public class RocksDBMetronome implements Closeable {
 
             List<ColumnFamilyHandle> columnFamilyList = new ArrayList<>(columnFamilyNames.size());
 
-            db = RocksDB.open(dbOptions, storagePath.toString(), familyDescriptors, columnFamilyList);
+            rocksDB = RocksDB.open(dbOptions, storagePath.toString(), familyDescriptors, columnFamilyList);
 
             // create the map of names to handles
             for (ColumnFamilyHandle cf : columnFamilyList) {
@@ -226,6 +234,8 @@ public class RocksDBMetronome implements Closeable {
 
         } catch (RocksDBException e) {
             throw new IOException(e);
+        } finally {
+            dbWriteLock.unlock();
         }
 
         if (automaticSyncEnabled) {
@@ -235,53 +245,119 @@ public class RocksDBMetronome implements Closeable {
         logger.info("Initialized RocksDB Repository at {}", storagePath);
     }
 
+
+    /**
+     * This method checks the state of the database to ensure it is available for use.
+     *
+     * NOTE: This *must* be called holding the dbReadLock
+     *
+     * @throws IllegalStateException if the database is closed or not yet initialized
+     */
+    private void checkDbState() throws IllegalStateException {
+        if (rocksDB == null) {
+            if (closed) {
+                throw new IllegalStateException("RocksDBMetronome is closed");
+            }
+            throw new IllegalStateException("RocksDBMetronome has not been initialized");
+        }
+
+    }
+
+    public RocksIterator getIterator(final ColumnFamilyHandle columnFamilyHandle) {
+        dbReadLock.lock();
+        try {
+            checkDbState();
+            return rocksDB.newIterator(columnFamilyHandle);
+        } finally {
+            dbReadLock.unlock();
+        }
+    }
+
+    public byte[] get(final ColumnFamilyHandle columnFamilyHandle, final byte[] key) throws RocksDBException {
+        dbReadLock.lock();
+        try {
+            checkDbState();
+            return rocksDB.get(columnFamilyHandle, key);
+        } finally {
+            dbReadLock.unlock();
+        }
+    }
+
+    public void put(final ColumnFamilyHandle columnFamilyHandle, WriteOptions writeOptions, final byte[] key, final byte[] value) throws RocksDBException {
+        dbReadLock.lock();
+        try {
+            checkDbState();
+            rocksDB.put(columnFamilyHandle, writeOptions, key, value);
+        } finally {
+            dbReadLock.unlock();
+        }
+    }
+
+    public void delete(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final WriteOptions writeOptions) throws RocksDBException {
+        dbReadLock.lock();
+        try {
+            checkDbState();
+            rocksDB.delete(columnFamilyHandle, writeOptions, key);
+        } finally {
+            dbReadLock.unlock();
+        }
+    }
+
+    public void forceSync() throws RocksDBException {
+        dbReadLock.lock();
+        try {
+            checkDbState();
+            rocksDB.syncWal();
+        } finally {
+            dbReadLock.unlock();
+        }
+    }
+
     public ColumnFamilyHandle getColumnFamilyHandle(String familyName) {
         return columnFamilyHandles.get(familyName);
     }
 
-    public byte[] getConfiguration(final byte[] key) throws RocksDBException {
-        return db.get(configurationColumnFamilyHandle, key);
-    }
-
     public void putConfiguration(final byte[] key, final byte[] value) throws RocksDBException {
-        db.put(configurationColumnFamilyHandle, forceSyncWriteOptions, key, value);
+        put(configurationColumnFamilyHandle, forceSyncWriteOptions, key, value);
     }
 
     public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value) throws RocksDBException {
-        put(columnFamilyHandle, key, value, false);
+        put(columnFamilyHandle, noSyncWriteOptions, key, value);
     }
 
     public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
-        db.put(columnFamilyHandle, getWriteOptions(forceSync), key, value);
+        put(columnFamilyHandle, getWriteOptions(forceSync), key, value);
     }
 
     public void put(final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
-        db.put(recordsColumnFamilyHandle, getWriteOptions(forceSync), key, value);
-    }
-
-    public byte[] get(final byte[] key) throws RocksDBException {
-        return db.get(recordsColumnFamilyHandle, key);
-    }
-
-    public byte[] get(final ColumnFamilyHandle columnFamilyHandle, final byte[] key) throws RocksDBException {
-        return db.get(columnFamilyHandle, key);
+        put(recordsColumnFamilyHandle, getWriteOptions(forceSync), key, value);
     }
 
     public void put(final byte[] key, final byte[] value) throws RocksDBException {
-        db.put(recordsColumnFamilyHandle, noSyncWriteOptions, key, value);
+        put(recordsColumnFamilyHandle, noSyncWriteOptions, key, value);
     }
 
+    public byte[] get(final byte[] key) throws RocksDBException {
+        return get(recordsColumnFamilyHandle, key);
+    }
+
+    public byte[] getConfiguration(final byte[] key) throws RocksDBException {
+        return get(configurationColumnFamilyHandle, key);
+    }
+
+
     public void delete(byte[] key) throws RocksDBException {
-        db.delete(recordsColumnFamilyHandle, key);
+        delete(recordsColumnFamilyHandle, key, noSyncWriteOptions);
     }
 
     public void delete(final ColumnFamilyHandle columnFamilyHandle, byte[] key) throws RocksDBException {
-        db.delete(columnFamilyHandle, key);
+        delete(columnFamilyHandle, key, noSyncWriteOptions);
     }
 
     public void delete(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final boolean forceSync) throws RocksDBException {
-        db.delete(columnFamilyHandle, getWriteOptions(forceSync), key);
+        delete(columnFamilyHandle, key, getWriteOptions(forceSync));
     }
+
 
     private WriteOptions getWriteOptions(boolean forceSync) {
         return forceSync ? forceSyncWriteOptions : noSyncWriteOptions;
@@ -289,14 +365,6 @@ public class RocksDBMetronome implements Closeable {
 
     public RocksIterator recordIterator() {
         return getIterator(recordsColumnFamilyHandle);
-    }
-
-    public RocksIterator getIterator(final ColumnFamilyHandle columnFamilyHandle) {
-        return db.newIterator(columnFamilyHandle);
-    }
-
-    public void forceSync() throws RocksDBException {
-        db.syncWal();
     }
 
     public int getSyncCounterValue() {
@@ -313,19 +381,14 @@ public class RocksDBMetronome implements Closeable {
 
         logger.info("Closing RocksDBMetronome");
 
-        // syncing here so we don't close the db while doSync() might be using it
-        syncLock.lock();
+        dbWriteLock.lock();
         try {
             logger.info("Shutting down RocksDBMetronome sync executor");
             syncExecutor.shutdownNow();
 
-            // don't allow any possible access to db during closing
-            RocksDB dbToClose = db;
-            db = null;
-
             try {
                 logger.info("Pausing RocksDB background work");
-                dbToClose.pauseBackgroundWork();
+                rocksDB.pauseBackgroundWork();
             } catch (RocksDBException e) {
                 logger.warn("Unable to pause background work before close.", e);
             }
@@ -343,13 +406,15 @@ public class RocksDBMetronome implements Closeable {
             }
 
             logger.info("Closing RocksDB database");
-            safeClose(dbToClose, exceptionReference);
+            safeClose(rocksDB, exceptionReference);
+            rocksDB = null;
+            closed = true;
 
             if (exceptionReference.get() != null) {
                 throw new IOException(exceptionReference.get());
             }
         } finally {
-            syncLock.unlock();
+            dbWriteLock.unlock();
         }
     }
 
@@ -482,7 +547,7 @@ public class RocksDBMetronome implements Closeable {
     }
 
     /**
-     * @return the storage path of rocks db
+     * @return the storage path of the db
      */
     public Path getStoragePath() {
         return storagePath;

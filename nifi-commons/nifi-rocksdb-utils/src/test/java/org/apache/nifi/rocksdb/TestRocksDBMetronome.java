@@ -130,7 +130,7 @@ public class TestRocksDBMetronome {
         }
     }
 
-    @Test (expected = NullPointerException.class)
+    @Test (expected = IllegalStateException.class)
     public void testPutBeforeInit() throws Exception {
 
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
@@ -140,7 +140,7 @@ public class TestRocksDBMetronome {
         }
     }
 
-    @Test (expected = NullPointerException.class)
+    @Test (expected = IllegalStateException.class)
     public void testPutClosed() throws Exception {
 
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
