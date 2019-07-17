@@ -690,6 +690,7 @@ public class TestRocksDBFlowFileRepository {
     private Collection<Long> getIDs(Collection<FlowFileRecord> flowFileQueue) {
         final Collection<Long> inMemoryIds = new HashSet<>();
         for (FlowFileRecord flowFileRecord : flowFileQueue) {
+            assertNotNull(flowFileRecord);
             inMemoryIds.add(flowFileRecord.getId());
         }
         return inMemoryIds;
