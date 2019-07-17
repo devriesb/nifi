@@ -569,8 +569,9 @@ public class TestRocksDBFlowFileRepository {
 
             for (int i = 0; i < 4; i++) {
 
+                assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), recoveryLimit, queuedFlowFiles.size());
                 int flowFilesDeleted = deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
-                assertEquals(recoveryLimit, flowFilesDeleted);
+                assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), recoveryLimit, flowFilesDeleted);
                 assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
 
                 repo.doRecovery();
@@ -613,10 +614,21 @@ public class TestRocksDBFlowFileRepository {
 
     private String getRepoState(int i, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
 
-        return "i = " + i +
-                "queuedFlowFiles.size = " + queuedFlowFiles.size() +
-                "repo.getInMemoryFlowFiles()" + repo.getInMemoryFlowFiles() +
-                "repo.getRecordsToRestoreCount()" + repo.getRecordsToRestoreCount();
+        StringBuilder sb = new StringBuilder().append("i = ").append(i).append("\n")
+                .append("queuedFlowFiles.size = ").append(queuedFlowFiles.size()).append("\n")
+                .append("repo.getInMemoryFlowFiles()").append(repo.getInMemoryFlowFiles()).append("\n")
+                .append("repo.getRecordsToRestoreCount()").append(repo.getRecordsToRestoreCount()).append("\n");
+
+        sb.append("originalRecords:\n");
+        for (RepositoryRecord rr : originalRecords) {
+            sb.append("id: ").append(rr.getCurrent().getId()).append(" record: ").append(rr);
+        }
+        sb.append("queuedFlowFiles:\n");
+        for (FlowFileRecord ffr : queuedFlowFiles) {
+            sb.append("id: ").append(ffr.getId()).append(" record: ").append(ffr);
+        }
+
+        return sb.toString();
     }
 
     @Test
