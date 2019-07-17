@@ -527,8 +527,8 @@ public class TestRocksDBFlowFileRepository {
         int recoveryLimit = 10;
 
         final TestQueueProvider queueProvider = new TestQueueProvider();
-        List<RepositoryRecord> createdRecords = new ArrayList<>();
-        final List<FlowFileRecord> flowFileCollection = new ArrayList<>();
+        final List<FlowFileRecord> queuedFlowFiles = new ArrayList<>();
+        List<RepositoryRecord> originalRecords = new ArrayList<>();
 
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.CLAIM_CLEANUP_PERIOD.propertyName, "24 hours"); // "disable" the cleanup thread, let us manually force recovery
 
@@ -537,7 +537,7 @@ public class TestRocksDBFlowFileRepository {
             repo.initialize(new StandardResourceClaimManager());
             repo.loadFlowFiles(queueProvider);
 
-            final Connection connection = addConnectionToProvider(queueProvider, flowFileCollection);
+            final Connection connection = addConnectionToProvider(queueProvider, queuedFlowFiles);
 
             StandardFlowFileRecord.Builder ffBuilder = new StandardFlowFileRecord.Builder();
             ffBuilder.addAttribute("abc", "xyz");
@@ -546,15 +546,10 @@ public class TestRocksDBFlowFileRepository {
             // add records to the repo
             for (int i = 1; i <= totalFlowFiles; i++) {
                 List<RepositoryRecord> createRecord = getCreateRecord(ffBuilder.id(i).build(), connection);
-                repo.updateRepository(createRecord);
-                createdRecords.addAll(createRecord);
+                originalRecords.addAll(createRecord);
             }
+            repo.updateRepository(originalRecords);
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
-        }
-
-        // mark all our created records for delete
-        for (RepositoryRecord rec : createdRecords) {
-            ((StandardRepositoryRecord) rec).markForDelete();
         }
 
         // restore in recovery mode
@@ -567,13 +562,19 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
             assertEquals(totalFlowFiles - recoveryLimit, repo.getRecordsToRestoreCount());
 
+            long flowFilesRecovered = repo.getInMemoryFlowFiles();
+
             for (int i = 0; i < 4; i++) {
-                List<RepositoryRecord> recordsToDelete = getRecordsToDelete(createdRecords, flowFileCollection);
-                repo.updateRepository(recordsToDelete);
-                flowFileCollection.clear(); // our mock only adds, doesn't remove...
+
+                deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+                assertEquals(0, repo.getInMemoryFlowFiles());
+
                 repo.doRecovery();
                 assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
-                assertEquals(totalFlowFiles - (recoveryLimit * (i + 2)), repo.getRecordsToRestoreCount());
+
+                flowFilesRecovered += repo.getInMemoryFlowFiles();
+                assertEquals((recoveryLimit * (i + 2)), flowFilesRecovered);
+                assertEquals(totalFlowFiles - flowFilesRecovered, repo.getRecordsToRestoreCount());
             }
 
             // should have restored all files
@@ -581,9 +582,10 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
 
             // delete last files
-            List<RepositoryRecord> recordsToDelete = getRecordsToDelete(createdRecords, flowFileCollection);
-            repo.updateRepository(recordsToDelete);
-            flowFileCollection.clear(); // our mock only adds, doesn't remove...
+            deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+            assertEquals(0, repo.getRecordsToRestoreCount());
+            assertEquals(0, repo.getInMemoryFlowFiles());
+
             repo.doRecovery();
 
             // should have nothing left
@@ -669,12 +671,19 @@ public class TestRocksDBFlowFileRepository {
         }
     }
 
-    private List<RepositoryRecord> getRecordsToDelete(List<RepositoryRecord> createdRecords, List<FlowFileRecord> flowFileCollection) {
-        final Collection<Long> inMemoryIds = new ArrayList<>();
-        for (FlowFileRecord flowFileRecord : flowFileCollection) {
-            Long id = flowFileRecord.getId();
-            inMemoryIds.add(id);
+    private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, List<FlowFileRecord> queuedFlowFiles) throws IOException {
+
+        List<RepositoryRecord> recordsToDelete = getRepositoryRecordsForQueue(originalRecords, queuedFlowFiles);
+        for (RepositoryRecord rec : recordsToDelete) {
+            ((StandardRepositoryRecord) rec).markForDelete();
         }
+
+        repo.updateRepository(recordsToDelete);
+        queuedFlowFiles.clear(); // clear them from our "mock" queue
+    }
+
+    private List<RepositoryRecord> getRepositoryRecordsForQueue(List<RepositoryRecord> createdRecords, List<FlowFileRecord> flowFileQueue) {
+        final Collection<Long> inMemoryIds = getIDs(flowFileQueue);
         List<RepositoryRecord> list = new ArrayList<>();
         for (RepositoryRecord rec : createdRecords) {
             if (inMemoryIds.contains(rec.getCurrent().getId())) {
@@ -684,19 +693,29 @@ public class TestRocksDBFlowFileRepository {
         return list;
     }
 
-    private Connection addConnectionToProvider(TestQueueProvider
-                                                       queueProvider, List<FlowFileRecord> flowFileCollection) {
+    private Collection<Long> getIDs(List<FlowFileRecord> flowFileQueue) {
+        final Collection<Long> inMemoryIds = new ArrayList<>();
+        for (FlowFileRecord flowFileRecord : flowFileQueue) {
+            Long id = flowFileRecord.getId();
+            inMemoryIds.add(id);
+        }
+        return inMemoryIds;
+    }
+
+    private Connection addConnectionToProvider(TestQueueProvider queueProvider, List<FlowFileRecord> flowFileQueue) {
         final Connection connection = Mockito.mock(Connection.class);
         when(connection.getIdentifier()).thenReturn("1234");
 
         final FlowFileQueue queue = Mockito.mock(FlowFileQueue.class);
         when(queue.getIdentifier()).thenReturn("1234");
+
         doAnswer((Answer<Object>) invocation -> {
-            if (flowFileCollection != null) {
-                flowFileCollection.add((FlowFileRecord) invocation.getArguments()[0]);
+            if (flowFileQueue != null) {
+                flowFileQueue.add((FlowFileRecord) invocation.getArguments()[0]);
             }
             return null;
         }).when(queue).put(any(FlowFileRecord.class));
+
 
         when(connection.getFlowFileQueue()).thenReturn(queue);
 
