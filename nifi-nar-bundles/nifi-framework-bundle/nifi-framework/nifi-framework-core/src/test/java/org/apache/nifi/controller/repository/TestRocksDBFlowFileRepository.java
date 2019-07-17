@@ -569,7 +569,8 @@ public class TestRocksDBFlowFileRepository {
 
             for (int i = 0; i < 4; i++) {
 
-                deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+                int flowFilesDeleted = deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+                assertEquals(recoveryLimit, flowFilesDeleted);
                 assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
 
                 repo.doRecovery();
@@ -585,7 +586,8 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
 
             // delete last files
-            deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+            int flowFilesDeleted = deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+            assertEquals(recoveryLimit, flowFilesDeleted);
             assertEquals(0, repo.getRecordsToRestoreCount());
             assertEquals(0, repo.getInMemoryFlowFiles());
 
@@ -682,12 +684,13 @@ public class TestRocksDBFlowFileRepository {
         }
     }
 
-    private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
+    private int deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
         Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
         Collection<RepositoryRecord> recordsToDelete = originalRecords.stream().filter(repositoryRecord -> inMemoryIds.contains(repositoryRecord.getCurrent().getId())).collect(Collectors.toSet());
         recordsToDelete.forEach(rec -> ((StandardRepositoryRecord) rec).markForDelete());
         repo.updateRepository(recordsToDelete);
         queuedFlowFiles.clear(); // clear them from our "mock" queue
+        return recordsToDelete.size();
     }
 
     private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
@@ -695,7 +698,7 @@ public class TestRocksDBFlowFileRepository {
         final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
             @Override
             public void put(final FlowFileRecord file) {
-                assertNotNull(file);
+                assertNotNull(file); //TODO remove this
                 if (flowFileQueue != null) {
                     flowFileQueue.add(file);
                 }
