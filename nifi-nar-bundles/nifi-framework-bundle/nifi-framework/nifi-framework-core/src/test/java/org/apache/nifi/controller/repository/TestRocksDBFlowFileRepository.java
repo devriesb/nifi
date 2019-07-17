@@ -57,6 +57,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
@@ -528,7 +529,7 @@ public class TestRocksDBFlowFileRepository {
         int recoveryLimit = 10;
 
         final TestQueueProvider queueProvider = new TestQueueProvider();
-        final List<FlowFileRecord> queuedFlowFiles = new ArrayList<>();
+        final Collection<FlowFileRecord> queuedFlowFiles = new HashSet<>();
         List<RepositoryRecord> originalRecords = new ArrayList<>();
 
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.CLAIM_CLEANUP_PERIOD.propertyName, "24 hours"); // "disable" the cleanup thread, let us manually force recovery
@@ -672,7 +673,7 @@ public class TestRocksDBFlowFileRepository {
         }
     }
 
-    private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, List<FlowFileRecord> queuedFlowFiles) throws IOException {
+    private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
 
         final Collection<Long> inMemoryIds = getIDs(queuedFlowFiles);
         Collection<RepositoryRecord> recordsToDelete = new HashSet<>();
@@ -696,7 +697,7 @@ public class TestRocksDBFlowFileRepository {
         return inMemoryIds;
     }
 
-    private Connection addConnectionToProvider(TestQueueProvider queueProvider, List<FlowFileRecord> flowFileQueue) {
+    private Connection addConnectionToProvider(TestQueueProvider queueProvider, Collection<FlowFileRecord> flowFileQueue) {
         final Connection connection = Mockito.mock(Connection.class);
         when(connection.getIdentifier()).thenReturn("1234");
 
