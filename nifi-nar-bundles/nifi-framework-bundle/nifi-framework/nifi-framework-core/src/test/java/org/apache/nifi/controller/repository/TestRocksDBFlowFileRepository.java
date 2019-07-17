@@ -29,6 +29,7 @@ import org.apache.nifi.controller.repository.claim.StandardContentClaim;
 import org.apache.nifi.controller.repository.claim.StandardResourceClaimManager;
 import org.apache.nifi.controller.swap.StandardSwapContents;
 import org.apache.nifi.controller.swap.StandardSwapSummary;
+import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.rocksdb.RocksDBMetronome;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.file.FileUtils;
@@ -58,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -568,7 +570,7 @@ public class TestRocksDBFlowFileRepository {
             for (int i = 0; i < 4; i++) {
 
                 deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
-                assertEquals(0, repo.getInMemoryFlowFiles());
+                assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
 
                 repo.doRecovery();
                 assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
@@ -605,6 +607,14 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(0, repo.getRecordsToRestoreCount());
             assertEquals(0, repo.getInMemoryFlowFiles());
         }
+    }
+
+    private String getRepoState(int i, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
+
+        return "i = " + i +
+                "queuedFlowFiles.size = " + queuedFlowFiles.size() +
+                "repo.getInMemoryFlowFiles()" + repo.getInMemoryFlowFiles() +
+                "repo.getRecordsToRestoreCount()" + repo.getRecordsToRestoreCount();
     }
 
     @Test
@@ -673,27 +683,11 @@ public class TestRocksDBFlowFileRepository {
     }
 
     private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
-
-        final Collection<Long> inMemoryIds = getIDs(queuedFlowFiles);
-        Collection<RepositoryRecord> recordsToDelete = new HashSet<>();
-        for (RepositoryRecord rec : originalRecords) {
-            if (inMemoryIds.contains(rec.getCurrent().getId())) {
-                ((StandardRepositoryRecord) rec).markForDelete();
-                recordsToDelete.add(rec);
-            }
-        }
-
+        Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
+        Collection<RepositoryRecord> recordsToDelete = originalRecords.stream().filter(repositoryRecord -> inMemoryIds.contains(repositoryRecord.getCurrent().getId())).collect(Collectors.toSet());
+        recordsToDelete.forEach(rec -> ((StandardRepositoryRecord) rec).markForDelete());
         repo.updateRepository(recordsToDelete);
         queuedFlowFiles.clear(); // clear them from our "mock" queue
-    }
-
-    private Collection<Long> getIDs(Collection<FlowFileRecord> flowFileQueue) {
-        final Collection<Long> inMemoryIds = new HashSet<>();
-        for (FlowFileRecord flowFileRecord : flowFileQueue) {
-            assertNotNull(flowFileRecord);
-            inMemoryIds.add(flowFileRecord.getId());
-        }
-        return inMemoryIds;
     }
 
     private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
@@ -701,6 +695,7 @@ public class TestRocksDBFlowFileRepository {
         final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
             @Override
             public void put(final FlowFileRecord file) {
+                assertNotNull(file);
                 if (flowFileQueue != null) {
                     flowFileQueue.add(file);
                 }
