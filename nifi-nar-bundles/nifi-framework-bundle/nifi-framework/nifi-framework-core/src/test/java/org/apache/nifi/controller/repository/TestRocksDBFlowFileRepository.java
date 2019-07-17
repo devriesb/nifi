@@ -53,6 +53,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -673,31 +674,23 @@ public class TestRocksDBFlowFileRepository {
 
     private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, List<FlowFileRecord> queuedFlowFiles) throws IOException {
 
-        List<RepositoryRecord> recordsToDelete = getRepositoryRecordsForQueue(originalRecords, queuedFlowFiles);
-        for (RepositoryRecord rec : recordsToDelete) {
-            ((StandardRepositoryRecord) rec).markForDelete();
+        final Collection<Long> inMemoryIds = getIDs(queuedFlowFiles);
+        Collection<RepositoryRecord> recordsToDelete = new HashSet<>();
+        for (RepositoryRecord rec : originalRecords) {
+            if (inMemoryIds.contains(rec.getCurrent().getId())) {
+                ((StandardRepositoryRecord) rec).markForDelete();
+                recordsToDelete.add(rec);
+            }
         }
 
         repo.updateRepository(recordsToDelete);
         queuedFlowFiles.clear(); // clear them from our "mock" queue
     }
 
-    private List<RepositoryRecord> getRepositoryRecordsForQueue(List<RepositoryRecord> createdRecords, List<FlowFileRecord> flowFileQueue) {
-        final Collection<Long> inMemoryIds = getIDs(flowFileQueue);
-        List<RepositoryRecord> list = new ArrayList<>();
-        for (RepositoryRecord rec : createdRecords) {
-            if (inMemoryIds.contains(rec.getCurrent().getId())) {
-                list.add(rec);
-            }
-        }
-        return list;
-    }
-
-    private Collection<Long> getIDs(List<FlowFileRecord> flowFileQueue) {
-        final Collection<Long> inMemoryIds = new ArrayList<>();
+    private Collection<Long> getIDs(Collection<FlowFileRecord> flowFileQueue) {
+        final Collection<Long> inMemoryIds = new HashSet<>();
         for (FlowFileRecord flowFileRecord : flowFileQueue) {
-            Long id = flowFileRecord.getId();
-            inMemoryIds.add(id);
+            inMemoryIds.add(flowFileRecord.getId());
         }
         return inMemoryIds;
     }
