@@ -57,7 +57,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
@@ -697,21 +696,19 @@ public class TestRocksDBFlowFileRepository {
         return inMemoryIds;
     }
 
-    private Connection addConnectionToProvider(TestQueueProvider queueProvider, Collection<FlowFileRecord> flowFileQueue) {
+    private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
+
+        final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
+            @Override
+            public void put(final FlowFileRecord file) {
+                if (flowFileQueue != null) {
+                    flowFileQueue.add(file);
+                }
+            }
+        };
+
         final Connection connection = Mockito.mock(Connection.class);
         when(connection.getIdentifier()).thenReturn("1234");
-
-        final FlowFileQueue queue = Mockito.mock(FlowFileQueue.class);
-        when(queue.getIdentifier()).thenReturn("1234");
-
-        doAnswer((Answer<Object>) invocation -> {
-            if (flowFileQueue != null) {
-                flowFileQueue.add((FlowFileRecord) invocation.getArguments()[0]);
-            }
-            return null;
-        }).when(queue).put(any(FlowFileRecord.class));
-
-
         when(connection.getFlowFileQueue()).thenReturn(queue);
 
         queueProvider.addConnection(connection);
