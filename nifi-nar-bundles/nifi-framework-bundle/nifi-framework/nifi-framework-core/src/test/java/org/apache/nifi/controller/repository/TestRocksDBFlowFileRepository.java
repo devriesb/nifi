@@ -54,11 +54,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
@@ -344,12 +344,11 @@ public class TestRocksDBFlowFileRepository {
     @Test
     public void testDoNotRemoveOrphans() throws Exception {
 
-        final List<FlowFileRecord> flowFileCollection = new ArrayList<>();
         final TestQueueProvider queueProvider = new TestQueueProvider();
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
-            final Connection connection = addConnectionToProvider(queueProvider, flowFileCollection);
+            final Connection connection = addConnectionToProvider(queueProvider);
 
             repo.initialize(new StandardResourceClaimManager());
             repo.loadFlowFiles(queueProvider);
@@ -386,14 +385,13 @@ public class TestRocksDBFlowFileRepository {
     @Test
     public void testRemoveOrphans() throws Exception {
 
-        final List<FlowFileRecord> flowFileCollection = new ArrayList<>();
         final TestQueueProvider queueProvider = new TestQueueProvider();
 
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.REMOVE_ORPHANED_FLOWFILES.propertyName, "true");
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
-            final Connection connection = addConnectionToProvider(queueProvider, flowFileCollection);
+            final Connection connection = addConnectionToProvider(queueProvider);
 
             repo.initialize(new StandardResourceClaimManager());
             repo.loadFlowFiles(queueProvider);
@@ -471,7 +469,7 @@ public class TestRocksDBFlowFileRepository {
             repo.initialize(new StandardResourceClaimManager());
             repo.loadFlowFiles(queueProvider);
 
-            final Connection connection = addConnectionToProvider(queueProvider, null);
+            final Connection connection = addConnectionToProvider(queueProvider);
 
             StandardFlowFileRecord.Builder ffBuilder = new StandardFlowFileRecord.Builder();
             ffBuilder.addAttribute("abc", "xyz");
@@ -530,7 +528,7 @@ public class TestRocksDBFlowFileRepository {
         int recoveryLimit = 10;
 
         final TestQueueProvider queueProvider = new TestQueueProvider();
-        final Collection<FlowFileRecord> queuedFlowFiles = new HashSet<>();
+        final Collection<FlowFileRecord> queuedFlowFiles = new ConcurrentSkipListSet<>();
         List<RepositoryRecord> originalRecords = new ArrayList<>();
 
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.CLAIM_CLEANUP_PERIOD.propertyName, "24 hours"); // "disable" the cleanup thread, let us manually force recovery
@@ -669,7 +667,7 @@ public class TestRocksDBFlowFileRepository {
             repo.initialize(new StandardResourceClaimManager());
             repo.loadFlowFiles(queueProvider);
 
-            final Connection connection = addConnectionToProvider(queueProvider, null);
+            final Connection connection = addConnectionToProvider(queueProvider);
 
             StandardFlowFileRecord.Builder ffBuilder = new StandardFlowFileRecord.Builder();
             ffBuilder.addAttribute("abc", "xyz");
@@ -719,6 +717,7 @@ public class TestRocksDBFlowFileRepository {
     private void deleteInMemoryFlowFiles(int expectedNumDeleted, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
 
         Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
+
         assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
                 queuedFlowFiles.size(), inMemoryIds.size());
         assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
@@ -747,6 +746,10 @@ public class TestRocksDBFlowFileRepository {
         return sb.toString();
     }
 
+    private Connection addConnectionToProvider(TestQueueProvider queueProvider) {
+        return addConnectionToProvider(queueProvider, null);
+    }
+
     private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
 
         final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
@@ -754,7 +757,7 @@ public class TestRocksDBFlowFileRepository {
             public void put(final FlowFileRecord file) {
                 assertNotNull(file); //TODO remove this
                 if (flowFileQueue != null) {
-                    if(flowFileQueue.contains(file)){
+                    if (flowFileQueue.contains(file)) {
                         throw new IllegalStateException("File was already in queue: " + file);
                     }
                     flowFileQueue.add(file);
