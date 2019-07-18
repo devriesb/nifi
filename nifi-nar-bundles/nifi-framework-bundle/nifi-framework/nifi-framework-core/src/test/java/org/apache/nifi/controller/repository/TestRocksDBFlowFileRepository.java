@@ -702,8 +702,12 @@ public class TestRocksDBFlowFileRepository {
     private void deleteInMemoryFlowFiles(int expectedNumDeleted, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
 
         Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
-        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles), queuedFlowFiles.size(), inMemoryIds.size());
-        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), inMemoryIds.size(), repo.getInMemoryFlowFiles());
+        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
+                queuedFlowFiles.size(), inMemoryIds.size());
+        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
+                expectedNumDeleted, inMemoryIds.size());
+        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
+                inMemoryIds.size(), repo.getInMemoryFlowFiles());
 
         Collection<RepositoryRecord> recordsToDelete = originalRecords.stream().filter(repositoryRecord -> inMemoryIds.contains(repositoryRecord.getCurrent().getId())).collect(Collectors.toSet());
         assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), expectedNumDeleted, recordsToDelete.size());
