@@ -528,11 +528,12 @@ public class TestRocksDBFlowFileRepository {
         int recoveryLimit = 10;
 
         final TestQueueProvider queueProvider = new TestQueueProvider();
-        final Collection<FlowFileRecord> queuedFlowFiles = new ConcurrentSkipListSet<>();
+        final Collection<FlowFileRecord> queuedFlowFiles = new ConcurrentSkipListSet<>(); // accessed from other threads in loadFlowFiles()
         List<RepositoryRecord> originalRecords = new ArrayList<>();
 
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.CLAIM_CLEANUP_PERIOD.propertyName, "24 hours"); // "disable" the cleanup thread, let us manually force recovery
 
+        // add files to repo
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
             repo.initialize(new StandardResourceClaimManager());
@@ -565,7 +566,7 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(totalFlowFiles, queuedFlowFiles.size());
         }
 
-        queuedFlowFiles.clear();
+        queuedFlowFiles.clear(); // TODO clean this up
         assertEquals(0, queuedFlowFiles.size());
 
         // restore in recovery mode
@@ -581,12 +582,8 @@ public class TestRocksDBFlowFileRepository {
             long flowFilesRecovered = repo.getInMemoryFlowFiles();
 
             for (int i = 0; i < 4; i++) {
-
-                logger.info("Loop: " + i + " of " + testName.getMethodName());
-
-                assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), recoveryLimit, queuedFlowFiles.size());
-                deleteInMemoryFlowFiles(recoveryLimit, repo, originalRecords, queuedFlowFiles);
-                assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
+                deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
+                assertEquals(0, repo.getInMemoryFlowFiles());
 
                 repo.doRecovery();
                 assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
@@ -601,7 +598,7 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
 
             // delete last files
-            deleteInMemoryFlowFiles(recoveryLimit, repo, originalRecords, queuedFlowFiles);
+            deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
             assertEquals(0, repo.getRecordsToRestoreCount());
             assertEquals(0, repo.getInMemoryFlowFiles());
 
@@ -623,30 +620,6 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(0, repo.getRecordsToRestoreCount());
             assertEquals(0, repo.getInMemoryFlowFiles());
         }
-    }
-
-    private String getRepoState(int i, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
-        return "i = " + i + "\n" + getRepoState(repo, originalRecords, queuedFlowFiles);
-    }
-
-    private String getRepoState(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
-
-        StringBuilder sb = new StringBuilder().append("\n")
-                .append("\noriginalRecords.size = ").append(originalRecords.size()).append("\n")
-                .append("queuedFlowFiles.size = ").append(queuedFlowFiles.size()).append("\n")
-                .append("repo.getInMemoryFlowFiles()").append(repo.getInMemoryFlowFiles()).append("\n")
-                .append("repo.getRecordsToRestoreCount()").append(repo.getRecordsToRestoreCount()).append("\n");
-
-        sb.append("\noriginalRecords:\n");
-        for (RepositoryRecord rr : originalRecords) {
-            sb.append("\nid: ").append(rr.getCurrent().getId()).append(" record: ").append(rr);
-        }
-        sb.append("\nqueuedFlowFiles:\n");
-        for (FlowFileRecord ffr : queuedFlowFiles) {
-            sb.append("\nid: ").append(ffr.getId()).append(" record: ").append(ffr);
-        }
-
-        return sb.toString();
     }
 
     @Test
@@ -714,36 +687,14 @@ public class TestRocksDBFlowFileRepository {
         }
     }
 
-    private void deleteInMemoryFlowFiles(int expectedNumDeleted, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
+    private void deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
 
         Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
-
-        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
-                queuedFlowFiles.size(), inMemoryIds.size());
-        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
-                expectedNumDeleted, inMemoryIds.size());
-        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles),
-                inMemoryIds.size(), repo.getInMemoryFlowFiles());
-
         Collection<RepositoryRecord> recordsToDelete = originalRecords.stream().filter(repositoryRecord -> inMemoryIds.contains(repositoryRecord.getCurrent().getId())).collect(Collectors.toSet());
-        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), expectedNumDeleted, recordsToDelete.size());
 
         recordsToDelete.forEach(rec -> ((StandardRepositoryRecord) rec).markForDelete());
         repo.updateRepository(recordsToDelete);
         queuedFlowFiles.clear(); // clear them from our "mock" queue
-
-        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), 0, queuedFlowFiles.size());
-        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
-    }
-
-    private String printCollection(Collection<Long> collection) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("[");
-        for (long l : collection) {
-            sb.append(l).append(",");
-        }
-        sb.append("]");
-        return sb.toString();
     }
 
     private Connection addConnectionToProvider(TestQueueProvider queueProvider) {
@@ -755,15 +706,8 @@ public class TestRocksDBFlowFileRepository {
         final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
             @Override
             public void put(final FlowFileRecord file) {
-                assertNotNull(file); //TODO remove this
                 if (flowFileQueue != null) {
-                    if (flowFileQueue.contains(file)) {
-                        throw new IllegalStateException("File was already in queue: " + file);
-                    }
                     flowFileQueue.add(file);
-                    logger.info("Adding to queue: " + file);
-                } else {
-                    logger.info("Not adding NULL file to queue: " + file);
                 }
             }
         };
