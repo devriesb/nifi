@@ -570,8 +570,7 @@ public class TestRocksDBFlowFileRepository {
             for (int i = 0; i < 4; i++) {
 
                 assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), recoveryLimit, queuedFlowFiles.size());
-                int flowFilesDeleted = deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
-                assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), recoveryLimit, flowFilesDeleted);
+                deleteInMemoryFlowFiles(recoveryLimit, repo, originalRecords, queuedFlowFiles);
                 assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
 
                 repo.doRecovery();
@@ -587,8 +586,7 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
 
             // delete last files
-            int flowFilesDeleted = deleteInMemoryFlowFiles(repo, originalRecords, queuedFlowFiles);
-            assertEquals(recoveryLimit, flowFilesDeleted);
+            deleteInMemoryFlowFiles(recoveryLimit, repo, originalRecords, queuedFlowFiles);
             assertEquals(0, repo.getRecordsToRestoreCount());
             assertEquals(0, repo.getInMemoryFlowFiles());
 
@@ -613,19 +611,24 @@ public class TestRocksDBFlowFileRepository {
     }
 
     private String getRepoState(int i, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
+        return "i = " + i + "\n" + getRepoState(repo, originalRecords, queuedFlowFiles);
+    }
 
-        StringBuilder sb = new StringBuilder().append("i = ").append(i).append("\n")
+    private String getRepoState(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
+
+        StringBuilder sb = new StringBuilder()
+                .append("originalRecords.size = ").append(originalRecords.size()).append("\n")
                 .append("queuedFlowFiles.size = ").append(queuedFlowFiles.size()).append("\n")
                 .append("repo.getInMemoryFlowFiles()").append(repo.getInMemoryFlowFiles()).append("\n")
                 .append("repo.getRecordsToRestoreCount()").append(repo.getRecordsToRestoreCount()).append("\n");
 
-        sb.append("originalRecords:\n");
+        sb.append("\noriginalRecords:\n");
         for (RepositoryRecord rr : originalRecords) {
-            sb.append("id: ").append(rr.getCurrent().getId()).append(" record: ").append(rr);
+            sb.append("\nid: ").append(rr.getCurrent().getId()).append(" record: ").append(rr);
         }
-        sb.append("queuedFlowFiles:\n");
+        sb.append("\nqueuedFlowFiles:\n");
         for (FlowFileRecord ffr : queuedFlowFiles) {
-            sb.append("id: ").append(ffr.getId()).append(" record: ").append(ffr);
+            sb.append("\nid: ").append(ffr.getId()).append(" record: ").append(ffr);
         }
 
         return sb.toString();
@@ -696,13 +699,21 @@ public class TestRocksDBFlowFileRepository {
         }
     }
 
-    private int deleteInMemoryFlowFiles(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
+    private void deleteInMemoryFlowFiles(int expectedNumDeleted, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
+
         Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
+        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), expectedNumDeleted, inMemoryIds.size());
+        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), inMemoryIds.size(), repo.getInMemoryFlowFiles());
+
         Collection<RepositoryRecord> recordsToDelete = originalRecords.stream().filter(repositoryRecord -> inMemoryIds.contains(repositoryRecord.getCurrent().getId())).collect(Collectors.toSet());
+        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), expectedNumDeleted, recordsToDelete.size());
+
         recordsToDelete.forEach(rec -> ((StandardRepositoryRecord) rec).markForDelete());
         repo.updateRepository(recordsToDelete);
         queuedFlowFiles.clear(); // clear them from our "mock" queue
-        return recordsToDelete.size();
+
+        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), 0, queuedFlowFiles.size());
+        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
     }
 
     private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
