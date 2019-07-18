@@ -754,10 +754,14 @@ public class TestRocksDBFlowFileRepository {
             public void put(final FlowFileRecord file) {
                 assertNotNull(file); //TODO remove this
                 if (flowFileQueue != null) {
+                    if(flowFileQueue.contains(file)){
+                        throw new IllegalStateException("File was already in queue: " + file);
+                    }
                     flowFileQueue.add(file);
                     logger.info("Adding to queue: " + file);
+                } else {
+                    logger.info("Not adding NULL file to queue: " + file);
                 }
-                logger.info("Not adding NULL file to queue: " + file);
             }
         };
 
