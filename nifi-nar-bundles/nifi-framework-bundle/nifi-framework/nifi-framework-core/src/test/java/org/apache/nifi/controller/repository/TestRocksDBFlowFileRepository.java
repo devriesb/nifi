@@ -616,8 +616,8 @@ public class TestRocksDBFlowFileRepository {
 
     private String getRepoState(RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) {
 
-        StringBuilder sb = new StringBuilder()
-                .append("originalRecords.size = ").append(originalRecords.size()).append("\n")
+        StringBuilder sb = new StringBuilder().append("\n")
+                .append("\noriginalRecords.size = ").append(originalRecords.size()).append("\n")
                 .append("queuedFlowFiles.size = ").append(queuedFlowFiles.size()).append("\n")
                 .append("repo.getInMemoryFlowFiles()").append(repo.getInMemoryFlowFiles()).append("\n")
                 .append("repo.getRecordsToRestoreCount()").append(repo.getRecordsToRestoreCount()).append("\n");
@@ -702,7 +702,7 @@ public class TestRocksDBFlowFileRepository {
     private void deleteInMemoryFlowFiles(int expectedNumDeleted, RocksDBFlowFileRepository repo, List<RepositoryRecord> originalRecords, Collection<FlowFileRecord> queuedFlowFiles) throws IOException {
 
         Collection<Long> inMemoryIds = queuedFlowFiles.stream().map(FlowFile::getId).collect(Collectors.toSet());
-        assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), expectedNumDeleted, inMemoryIds.size());
+        assertEquals("\ninMemoryIds: \n" + printCollection(inMemoryIds) + getRepoState(repo, originalRecords, queuedFlowFiles), expectedNumDeleted, inMemoryIds.size());
         assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), inMemoryIds.size(), repo.getInMemoryFlowFiles());
 
         Collection<RepositoryRecord> recordsToDelete = originalRecords.stream().filter(repositoryRecord -> inMemoryIds.contains(repositoryRecord.getCurrent().getId())).collect(Collectors.toSet());
@@ -714,6 +714,16 @@ public class TestRocksDBFlowFileRepository {
 
         assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), 0, queuedFlowFiles.size());
         assertEquals(getRepoState(repo, originalRecords, queuedFlowFiles), 0, repo.getInMemoryFlowFiles());
+    }
+
+    private String printCollection(Collection<Long> collection) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        for (long l : collection) {
+            sb.append(l).append(",");
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
