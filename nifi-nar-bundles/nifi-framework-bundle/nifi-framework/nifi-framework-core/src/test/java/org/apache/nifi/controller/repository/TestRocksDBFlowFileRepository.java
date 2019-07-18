@@ -555,6 +555,21 @@ public class TestRocksDBFlowFileRepository {
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
 
+        // restore in normal mode
+        additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.ENABLE_RECOVERY_MODE.propertyName, "false");
+        additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(1));
+
+        try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
+            repo.initialize(new StandardResourceClaimManager());
+            repo.loadFlowFiles(queueProvider);
+            assertEquals(0, repo.getRecordsToRestoreCount());
+            assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
+            assertEquals(totalFlowFiles, queuedFlowFiles.size());
+        }
+
+        queuedFlowFiles.clear();
+        assertEquals(0, queuedFlowFiles.size());
+
         // restore in recovery mode
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.ENABLE_RECOVERY_MODE.propertyName, "true");
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(recoveryLimit));
@@ -568,6 +583,8 @@ public class TestRocksDBFlowFileRepository {
             long flowFilesRecovered = repo.getInMemoryFlowFiles();
 
             for (int i = 0; i < 4; i++) {
+
+                logger.info("Loop: " + i + " of " + testName.getMethodName());
 
                 assertEquals(getRepoState(i, repo, originalRecords, queuedFlowFiles), recoveryLimit, queuedFlowFiles.size());
                 deleteInMemoryFlowFiles(recoveryLimit, repo, originalRecords, queuedFlowFiles);
@@ -738,7 +755,9 @@ public class TestRocksDBFlowFileRepository {
                 assertNotNull(file); //TODO remove this
                 if (flowFileQueue != null) {
                     flowFileQueue.add(file);
+                    logger.info("Adding to queue: " + file);
                 }
+                logger.info("Not adding NULL file to queue: " + file);
             }
         };
 
