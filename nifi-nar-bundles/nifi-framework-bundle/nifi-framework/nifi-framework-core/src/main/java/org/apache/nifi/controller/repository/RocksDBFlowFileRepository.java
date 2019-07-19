@@ -336,7 +336,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
                 .setAdviseRandomOnOpen(false)
                 .setCreateMissingColumnFamilies(true)
                 .setCreateIfMissing(true)
-                .setAutomaticSyncEnabled(!acceptDataLoss)
+                .setPeriodicSyncEnabled(!acceptDataLoss)
                 .build();
     }
 

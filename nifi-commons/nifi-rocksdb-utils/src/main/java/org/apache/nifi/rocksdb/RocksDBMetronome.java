@@ -92,7 +92,7 @@ public class RocksDBMetronome implements Closeable {
     private final Set<byte[]> columnFamilyNames;
     private final Map<String, ColumnFamilyHandle> columnFamilyHandles;
 
-    private final boolean automaticSyncEnabled;
+    private final boolean periodicSyncEnabled;
     private final ScheduledExecutorService syncExecutor;
     private final ReentrantLock syncLock = new ReentrantLock();
     private final Condition syncCondition = syncLock.newCondition();
@@ -131,7 +131,7 @@ public class RocksDBMetronome implements Closeable {
         columnFamilyNames = builder.columnFamilyNames;
         columnFamilyHandles = new HashMap<>(columnFamilyNames.size());
 
-        automaticSyncEnabled = builder.automaticSyncEnabled;
+        periodicSyncEnabled = builder.periodicSyncEnabled;
         syncExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = Executors.defaultThreadFactory().newThread(r);
             thread.setDaemon(true);
@@ -196,7 +196,7 @@ public class RocksDBMetronome implements Closeable {
                 .setDelayedWriteRate(delayedWriteRate)
                 .setIncreaseParallelism(parallelThreads)
                 .setLogger(getRocksLogger())
-                .setManualWalFlush(automaticSyncEnabled) // if automatic sync is enabled, that will handle flushing the wal
+                .setManualWalFlush(periodicSyncEnabled) // if periodic sync is enabled, that will handle flushing the wal
                 .setMaxBackgroundCompactions(maxBackgroundCompactions)
                 .setMaxBackgroundFlushes(maxBackgroundFlushes)
                 .setMaxTotalWalSize(maxTotalWalSize)
@@ -238,7 +238,7 @@ public class RocksDBMetronome implements Closeable {
             dbWriteLock.unlock();
         }
 
-        if (automaticSyncEnabled) {
+        if (periodicSyncEnabled) {
             syncExecutor.scheduleWithFixedDelay(this::doSync, syncMillis, syncMillis, TimeUnit.MILLISECONDS);
         }
 
@@ -655,7 +655,7 @@ public class RocksDBMetronome implements Closeable {
         boolean createIfMissing = true;
         boolean createMissingColumnFamilies = true;
         boolean useFsync = true;
-        boolean automaticSyncEnabled = true;
+        boolean periodicSyncEnabled = true;
         final Set<byte[]> columnFamilyNames = new HashSet<>();
 
         public RocksDBMetronome build() {
@@ -761,8 +761,8 @@ public class RocksDBMetronome implements Closeable {
             return this;
         }
 
-        public Builder setAutomaticSyncEnabled(boolean automaticSyncEnabled) {
-            this.automaticSyncEnabled = automaticSyncEnabled;
+        public Builder setPeriodicSyncEnabled(boolean periodicSyncEnabled) {
+            this.periodicSyncEnabled = periodicSyncEnabled;
             return this;
         }
 
