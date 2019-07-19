@@ -68,6 +68,7 @@ public class RocksDBMetronome implements Closeable {
     private static final Logger logger = LoggerFactory.getLogger(RocksDBMetronome.class);
 
     static final String CONFIGURATION_FAMILY = "configuration.column.family";
+    static final String DEFAULT_FAMILY = "default";
 
     private final AtomicLong lastSyncWarningNanos = new AtomicLong(0L);
     private final int parallelThreads;
@@ -224,6 +225,7 @@ public class RocksDBMetronome implements Closeable {
             rocksDB = RocksDB.open(dbOptions, storagePath.toString(), familyDescriptors, columnFamilyList);
 
             // create the map of names to handles
+            columnFamilyHandles.put(DEFAULT_FAMILY, rocksDB.getDefaultColumnFamily());
             for (ColumnFamilyHandle cf : columnFamilyList) {
                 columnFamilyHandles.put(new String(cf.getName(), StandardCharsets.UTF_8), cf);
             }
@@ -269,7 +271,7 @@ public class RocksDBMetronome implements Closeable {
      * Caller should close the iterator when it is no longer needed. The returned iterator should be closed before this db is closed.
      *
      * @param columnFamilyHandle specifies the column family for the iterator
-     * @return
+     * @return an iterator over the specified column family
      */
     public RocksIterator getIterator(final ColumnFamilyHandle columnFamilyHandle) {
         dbReadLock.lock();
@@ -351,51 +353,138 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * Get the handle for the specified column family
+     *
+     * @param familyName the name of the column family
+     * @return the handle
+     */
     public ColumnFamilyHandle getColumnFamilyHandle(String familyName) {
         return columnFamilyHandles.get(familyName);
     }
 
+    /**
+     * Put the key / value pair into the configuration column family and sync the wal
+     *
+     * @param key   the key to be inserted
+     * @param value the value to be associated with the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void putConfiguration(final byte[] key, final byte[] value) throws RocksDBException {
         put(configurationColumnFamilyHandle, forceSyncWriteOptions, key, value);
     }
 
+    /**
+     * Put the key / value pair into the database in the specified column family without syncing the wal
+     *
+     * @param columnFamilyHandle the column family in to which to put the value
+     * @param key                the key to be inserted
+     * @param value              the value to be associated with the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value) throws RocksDBException {
         put(columnFamilyHandle, noSyncWriteOptions, key, value);
     }
 
+    /**
+     * Put the key / value pair into the database in the specified column family, optionally syncing the wal
+     *
+     * @param columnFamilyHandle the column family in to which to put the value
+     * @param key                the key to be inserted
+     * @param value              the value to be associated with the specified key
+     * @param forceSync          if true, sync the wal
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void put(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
         put(columnFamilyHandle, getWriteOptions(forceSync), key, value);
     }
 
+    /**
+     * Put the key / value pair into the database in the default column family, optionally syncing the wal
+     *
+     * @param key       the key to be inserted
+     * @param value     the value to be associated with the specified key
+     * @param forceSync if true, sync the wal
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void put(final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
         put(defaultColumnFamilyHandle, getWriteOptions(forceSync), key, value);
     }
 
+    /**
+     * Put the key / value pair into the database in the default column family, without syncing the wal
+     *
+     * @param key   the key to be inserted
+     * @param value the value to be associated with the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void put(final byte[] key, final byte[] value) throws RocksDBException {
         put(defaultColumnFamilyHandle, noSyncWriteOptions, key, value);
     }
 
+    /**
+     * Get the value for the provided key in the default column family
+     *
+     * @param key the key of the value to retrieve
+     * @return the value for the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public byte[] get(final byte[] key) throws RocksDBException {
         return get(defaultColumnFamilyHandle, key);
     }
 
+    /**
+     * Get the value for the provided key in the configuration column family
+     *
+     * @param key the key of the value to retrieve
+     * @return the value for the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public byte[] getConfiguration(final byte[] key) throws RocksDBException {
         return get(configurationColumnFamilyHandle, key);
     }
 
 
+    /**
+     * Delete the key / value pair from the default column family without syncing the wal
+     *
+     * @param key the key to be inserted
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void delete(byte[] key) throws RocksDBException {
         delete(defaultColumnFamilyHandle, key, noSyncWriteOptions);
     }
 
+    /**
+     * Delete the key / value pair from the default column family, optionally syncing the wal
+     *
+     * @param key       the key to be inserted
+     * @param forceSync if true, sync the wal
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void delete(byte[] key, final boolean forceSync) throws RocksDBException {
         delete(defaultColumnFamilyHandle, key, getWriteOptions(forceSync));
     }
 
+    /**
+     * Delete the key / value pair from the default column family without syncing the wal
+     *
+     * @param columnFamilyHandle the column family in to which to put the value
+     * @param key                the key to be inserted
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void delete(final ColumnFamilyHandle columnFamilyHandle, byte[] key) throws RocksDBException {
         delete(columnFamilyHandle, key, noSyncWriteOptions);
     }
 
+    /**
+     * Delete the key / value pair from the specified column family, optionally syncing the wal
+     *
+     * @param columnFamilyHandle the column family in to which to put the value
+     * @param key                the key to be inserted
+     * @param forceSync          if true, sync the wal
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void delete(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final boolean forceSync) throws RocksDBException {
         delete(columnFamilyHandle, key, getWriteOptions(forceSync));
     }
@@ -404,10 +493,22 @@ public class RocksDBMetronome implements Closeable {
         return forceSync ? forceSyncWriteOptions : noSyncWriteOptions;
     }
 
+    /**
+     * Return an iterator over the default column family. The iterator is initially invalid (caller must call one of the Seek methods on the iterator before using it).
+     * <p>
+     * Caller should close the iterator when it is no longer needed. The returned iterator should be closed before this db is closed.
+     *
+     * @return an iterator over the default column family
+     */
     public RocksIterator getIterator() {
         return getIterator(defaultColumnFamilyHandle);
     }
 
+    /**
+     * Get the current value of the sync counter.  This can be used with waitForSync() to verify that operations have been synced to disk
+     *
+     * @return the current value of the sync counter
+     */
     public int getSyncCounterValue() {
         return syncCounter.get();
     }
@@ -515,7 +616,7 @@ public class RocksDBMetronome implements Closeable {
     }
 
     /**
-     * This method block until the next time the WAL is forced to disk, ensuring that all records written before this point have been persisted.
+     * This method blocks until the next time the WAL is forced to disk, ensuring that all records written before this point have been persisted.
      */
     public void waitForSync() throws InterruptedException {
         final int counterValue = syncCounter.get();
@@ -556,12 +657,24 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * Returns a representation of a long as a byte array
+     *
+     * @param value a long to convert
+     * @return a byte[] representation
+     */
     public static byte[] getBytes(long value) {
         byte[] bytes = new byte[8];
         writeLong(value, bytes);
         return bytes;
     }
 
+    /**
+     * Writes a representation of a long to the specified byte array
+     *
+     * @param l     a long to convert
+     * @param bytes an array to store the byte representation
+     */
     public static void writeLong(long l, byte[] bytes) {
         bytes[0] = (byte) (l >>> 56);
         bytes[1] = (byte) (l >>> 48);
@@ -573,6 +686,12 @@ public class RocksDBMetronome implements Closeable {
         bytes[7] = (byte) (l);
     }
 
+    /**
+     * Creates a long from it's byte array representation
+     * @param bytes to convert to a long
+     * @return a long
+     * @throws IOException if the given byte array is of the wrong size
+     */
     public static long readLong(final byte[] bytes) throws IOException {
         if (bytes.length != 8) {
             throw new IOException("wrong number of bytes to convert to long (must be 8)");
