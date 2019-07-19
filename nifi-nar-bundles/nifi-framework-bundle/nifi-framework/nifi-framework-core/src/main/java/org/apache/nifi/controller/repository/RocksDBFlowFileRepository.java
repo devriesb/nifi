@@ -1049,7 +1049,7 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         }
 
         long maxId = 0;
-        RocksIterator rocksIterator = db.recordIterator();
+        RocksIterator rocksIterator = db.getIterator();
         rocksIterator.seekToFirst();
         long counter = 0;
         long totalRecords = 0;

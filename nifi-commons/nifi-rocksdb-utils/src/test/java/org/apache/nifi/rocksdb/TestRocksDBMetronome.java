@@ -109,7 +109,7 @@ public class TestRocksDBMetronome {
             // test with "force sync"
             db.put(KEY, VALUE, true);
             assertArrayEquals(VALUE, db.get(KEY));
-            db.delete(db.getColumnFamilyHandle(RocksDBMetronome.RECORDS_FAMILY), KEY, true);
+            db.delete(KEY, true);
             assertNull(db.get(KEY));
         }
     }
@@ -130,7 +130,7 @@ public class TestRocksDBMetronome {
         }
     }
 
-    @Test (expected = IllegalStateException.class)
+    @Test(expected = IllegalStateException.class)
     public void testPutBeforeInit() throws Exception {
 
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
@@ -140,7 +140,7 @@ public class TestRocksDBMetronome {
         }
     }
 
-    @Test (expected = IllegalStateException.class)
+    @Test(expected = IllegalStateException.class)
     public void testPutClosed() throws Exception {
 
         try (RocksDBMetronome db = new RocksDBMetronome.Builder()
@@ -217,7 +217,7 @@ public class TestRocksDBMetronome {
             db.put(KEY, VALUE);
             db.put(KEY_2, VALUE_2);
 
-            RocksIterator iterator = db.recordIterator();
+            RocksIterator iterator = db.getIterator();
             iterator.seekToFirst();
 
             Map<String, byte[]> recovered = new HashMap<>();

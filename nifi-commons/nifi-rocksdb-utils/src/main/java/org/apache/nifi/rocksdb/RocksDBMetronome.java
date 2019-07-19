@@ -59,7 +59,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * This RocksDB helper class, instead of forcing to disk every time it's given a record,
- * writes all waiting records on a regular interval (using a ScheduledExecutorService).
+ * persists all waiting records on a regular interval (using a ScheduledExecutorService).
  * Like when a metronome ticks.
  */
 
@@ -68,7 +68,6 @@ public class RocksDBMetronome implements Closeable {
     private static final Logger logger = LoggerFactory.getLogger(RocksDBMetronome.class);
 
     static final String CONFIGURATION_FAMILY = "configuration.column.family";
-    static final String RECORDS_FAMILY = "records.column.family";
 
     private final AtomicLong lastSyncWarningNanos = new AtomicLong(0L);
     private final int parallelThreads;
@@ -106,7 +105,7 @@ public class RocksDBMetronome implements Closeable {
     private volatile boolean closed = false;
 
     private ColumnFamilyHandle configurationColumnFamilyHandle;
-    private ColumnFamilyHandle recordsColumnFamilyHandle;
+    private ColumnFamilyHandle defaultColumnFamilyHandle;
     private WriteOptions forceSyncWriteOptions;
     private WriteOptions noSyncWriteOptions;
 
@@ -229,8 +228,8 @@ public class RocksDBMetronome implements Closeable {
             }
 
             // set specific special handles
+            defaultColumnFamilyHandle = rocksDB.getDefaultColumnFamily();
             configurationColumnFamilyHandle = columnFamilyHandles.get(CONFIGURATION_FAMILY);
-            recordsColumnFamilyHandle = columnFamilyHandles.get(RECORDS_FAMILY);
 
         } catch (RocksDBException e) {
             throw new IOException(e);
@@ -363,15 +362,15 @@ public class RocksDBMetronome implements Closeable {
     }
 
     public void put(final byte[] key, final byte[] value, final boolean forceSync) throws RocksDBException {
-        put(recordsColumnFamilyHandle, getWriteOptions(forceSync), key, value);
+        put(defaultColumnFamilyHandle, getWriteOptions(forceSync), key, value);
     }
 
     public void put(final byte[] key, final byte[] value) throws RocksDBException {
-        put(recordsColumnFamilyHandle, noSyncWriteOptions, key, value);
+        put(defaultColumnFamilyHandle, noSyncWriteOptions, key, value);
     }
 
     public byte[] get(final byte[] key) throws RocksDBException {
-        return get(recordsColumnFamilyHandle, key);
+        return get(defaultColumnFamilyHandle, key);
     }
 
     public byte[] getConfiguration(final byte[] key) throws RocksDBException {
@@ -380,7 +379,11 @@ public class RocksDBMetronome implements Closeable {
 
 
     public void delete(byte[] key) throws RocksDBException {
-        delete(recordsColumnFamilyHandle, key, noSyncWriteOptions);
+        delete(defaultColumnFamilyHandle, key, noSyncWriteOptions);
+    }
+
+    public void delete(byte[] key, final boolean forceSync) throws RocksDBException {
+        delete(defaultColumnFamilyHandle, key, getWriteOptions(forceSync));
     }
 
     public void delete(final ColumnFamilyHandle columnFamilyHandle, byte[] key) throws RocksDBException {
@@ -396,8 +399,8 @@ public class RocksDBMetronome implements Closeable {
         return forceSync ? forceSyncWriteOptions : noSyncWriteOptions;
     }
 
-    public RocksIterator recordIterator() {
-        return getIterator(recordsColumnFamilyHandle);
+    public RocksIterator getIterator() {
+        return getIterator(defaultColumnFamilyHandle);
     }
 
     public int getSyncCounterValue() {
@@ -658,7 +661,6 @@ public class RocksDBMetronome implements Closeable {
             // add default column families
             columnFamilyNames.add(RocksDB.DEFAULT_COLUMN_FAMILY);
             columnFamilyNames.add(CONFIGURATION_FAMILY.getBytes(StandardCharsets.UTF_8));
-            columnFamilyNames.add(RECORDS_FAMILY.getBytes(StandardCharsets.UTF_8));
 
             return new RocksDBMetronome(this);
         }
