@@ -142,7 +142,7 @@ public class RocksDBMetronome implements Closeable {
     /**
      * Initialize the metronome
      *
-     * @throws java.io.IOException if there is an issue with the underlying database
+     * @throws IOException if there is an issue with the underlying database
      */
     public void initialize() throws IOException {
 
@@ -196,19 +196,20 @@ public class RocksDBMetronome implements Closeable {
                 .setDelayedWriteRate(delayedWriteRate)
                 .setIncreaseParallelism(parallelThreads)
                 .setLogger(getRocksLogger())
+                .setManualWalFlush(true)
                 .setMaxBackgroundCompactions(maxBackgroundCompactions)
                 .setMaxBackgroundFlushes(maxBackgroundFlushes)
                 .setMaxTotalWalSize(maxTotalWalSize)
-                .setUseFsync(useFsync)
                 .setStatsDumpPeriodSec(statDumpSeconds)
+                .setUseFsync(useFsync)
              ;
 
              final ColumnFamilyOptions cfOptions = new ColumnFamilyOptions()
                      .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                     .setMaxWriteBufferNumber(maxWriteBufferNumber)
-                     .setMinWriteBufferNumberToMerge(minWriteBufferNumberToMerge)
                      .setLevel0SlowdownWritesTrigger(level0SlowdownWritesTrigger)
                      .setLevel0StopWritesTrigger(level0StopWritesTrigger)
+                     .setMaxWriteBufferNumber(maxWriteBufferNumber)
+                     .setMinWriteBufferNumberToMerge(minWriteBufferNumberToMerge)
                      .setWriteBufferSize(writeBufferSize)
         ) {
 
@@ -335,11 +336,16 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * Flushes the WAL and syncs to disk
+     *
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void forceSync() throws RocksDBException {
         dbReadLock.lock();
         try {
             checkDbState();
-            rocksDB.syncWal();
+            rocksDB.flushWal(true);
         } finally {
             dbReadLock.unlock();
         }
@@ -393,7 +399,6 @@ public class RocksDBMetronome implements Closeable {
     public void delete(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final boolean forceSync) throws RocksDBException {
         delete(columnFamilyHandle, key, getWriteOptions(forceSync));
     }
-
 
     private WriteOptions getWriteOptions(boolean forceSync) {
         return forceSync ? forceSyncWriteOptions : noSyncWriteOptions;
