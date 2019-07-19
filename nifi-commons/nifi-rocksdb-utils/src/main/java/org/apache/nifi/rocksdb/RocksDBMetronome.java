@@ -196,7 +196,7 @@ public class RocksDBMetronome implements Closeable {
                 .setDelayedWriteRate(delayedWriteRate)
                 .setIncreaseParallelism(parallelThreads)
                 .setLogger(getRocksLogger())
-                .setManualWalFlush(true)
+                .setManualWalFlush(automaticSyncEnabled) // if automatic sync is enabled, that will handle flushing the wal
                 .setMaxBackgroundCompactions(maxBackgroundCompactions)
                 .setMaxBackgroundFlushes(maxBackgroundFlushes)
                 .setMaxTotalWalSize(maxTotalWalSize)
