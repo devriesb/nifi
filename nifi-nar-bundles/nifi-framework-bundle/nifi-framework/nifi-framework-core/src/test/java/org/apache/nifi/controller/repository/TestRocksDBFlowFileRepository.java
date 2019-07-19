@@ -349,9 +349,9 @@ public class TestRocksDBFlowFileRepository {
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(testQueue.queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
 
-            repo.updateRepository(testQueue.getCreateRecord(new StandardFlowFileRecord.Builder()
+            repo.updateRepository(testQueue.getRepositoryRecord(new StandardFlowFileRecord.Builder()
                     .id(1L)
                     .addAttribute("abc", "xyz")
                     .size(0L)
@@ -362,7 +362,7 @@ public class TestRocksDBFlowFileRepository {
         // restore (& confirm present)
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(testQueue.queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(1, repo.getInMemoryFlowFiles());
         }
 
@@ -379,33 +379,27 @@ public class TestRocksDBFlowFileRepository {
     @Test
     public void testRemoveOrphans() throws Exception {
 
-        final TestQueueProvider queueProvider = new TestQueueProvider();
+        final TestQueue testQueue = new TestQueue();
 
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.REMOVE_ORPHANED_FLOWFILES.propertyName, "true");
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
-            final Connection connection = addConnectionToProvider(queueProvider);
-
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
 
-            StandardFlowFileRecord.Builder ffBuilder = new StandardFlowFileRecord.Builder();
-            ffBuilder.id(1L);
-            ffBuilder.addAttribute("abc", "xyz");
-            ffBuilder.size(0L);
-            final FlowFileRecord flowFileRecord = ffBuilder.build();
-
-            final StandardRepositoryRecord record = new StandardRepositoryRecord(null);
-            record.setWorking(flowFileRecord);
-            record.setDestination(connection.getFlowFileQueue());
-            repo.updateRepository(Collections.singletonList(record));
+            repo.updateRepository(testQueue.getRepositoryRecord(new StandardFlowFileRecord.Builder()
+                    .id(1L)
+                    .addAttribute("abc", "xyz")
+                    .size(0L)
+                    .build()
+            ));
         }
 
         // restore (& confirm present)
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(1, repo.getInMemoryFlowFiles());
         }
         // restore with empty queue provider (should throw exception)
@@ -444,35 +438,26 @@ public class TestRocksDBFlowFileRepository {
         }
     }
 
-    private List<RepositoryRecord> getCreateRecord(FlowFileRecord flowFileRecord, Connection connection) {
-        final StandardRepositoryRecord record = new StandardRepositoryRecord(null);
-        record.setWorking(flowFileRecord);
-        record.setDestination(connection.getFlowFileQueue());
-        return Collections.singletonList(record);
-
-    }
-
-
     @Test
     public void testRecoveryMode() throws Exception {
 
         int totalFlowFiles = 50;
-        final TestQueueProvider queueProvider = new TestQueueProvider();
+
+        final TestQueue testQueue = new TestQueue();
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
-
-            final Connection connection = addConnectionToProvider(queueProvider);
-
-            StandardFlowFileRecord.Builder ffBuilder = new StandardFlowFileRecord.Builder();
-            ffBuilder.addAttribute("abc", "xyz");
-            ffBuilder.size(0L);
+            repo.loadFlowFiles(testQueue.provider);
 
             // add records to the repo
             for (int i = 1; i <= totalFlowFiles; i++) {
-                repo.updateRepository(getCreateRecord(ffBuilder.id(i).build(), connection));
+                repo.updateRepository(testQueue.getRepositoryRecord(new StandardFlowFileRecord.Builder()
+                        .id(i)
+                        .addAttribute("abc", "xyz")
+                        .size(0L)
+                        .build()
+                ));
             }
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
@@ -484,7 +469,7 @@ public class TestRocksDBFlowFileRepository {
             additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(recoveryLimit));
             try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
                 repo.initialize(new StandardResourceClaimManager());
-                repo.loadFlowFiles(queueProvider);
+                repo.loadFlowFiles(testQueue.provider);
                 assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
             }
         }
@@ -493,7 +478,7 @@ public class TestRocksDBFlowFileRepository {
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(totalFlowFiles));
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
 
@@ -501,7 +486,7 @@ public class TestRocksDBFlowFileRepository {
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.RECOVERY_MODE_FLOWFILE_LIMIT.propertyName, Integer.toString(Integer.MAX_VALUE));
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
 
@@ -511,7 +496,7 @@ public class TestRocksDBFlowFileRepository {
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
     }
@@ -526,26 +511,20 @@ public class TestRocksDBFlowFileRepository {
 
         final TestQueue testQueue = new TestQueue();
 
-        // add files to repo
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
-            // setup
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(testQueue.queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
 
-            // create records
-            final List<RepositoryRecord> originalRecords = new ArrayList<>();
+            // add records to the repo
             for (int i = 1; i <= totalFlowFiles; i++) {
-                originalRecords.addAll(testQueue.getCreateRecord(new StandardFlowFileRecord.Builder()
+                repo.updateRepository(testQueue.getRepositoryRecord(new StandardFlowFileRecord.Builder()
                         .id(i)
                         .addAttribute("abc", "xyz")
                         .size(0L)
                         .build()
                 ));
             }
-
-            // add records to the repo
-            repo.updateRepository(originalRecords);
             assertEquals(totalFlowFiles, repo.getInMemoryFlowFiles());
         }
 
@@ -555,7 +534,7 @@ public class TestRocksDBFlowFileRepository {
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(testQueue.queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(recoveryLimit, repo.getInMemoryFlowFiles());
             assertEquals(totalFlowFiles - recoveryLimit, repo.getRecordsToRestoreCount());
 
@@ -595,7 +574,7 @@ public class TestRocksDBFlowFileRepository {
 
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(testQueue.queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
             assertEquals(0, repo.getRecordsToRestoreCount());
             assertEquals(0, repo.getInMemoryFlowFiles());
         }
@@ -603,7 +582,7 @@ public class TestRocksDBFlowFileRepository {
 
     @Test
     public void testStallStop() throws IOException {
-        final TestQueueProvider queueProvider = new TestQueueProvider();
+        final TestQueue testQueue = new TestQueue();
 
         // set stall & stop properties
         additionalProperties.put(RocksDBFlowFileRepository.RocksDbProperty.ENABLE_STALL_STOP.propertyName, "true");
@@ -617,17 +596,15 @@ public class TestRocksDBFlowFileRepository {
         try (final RocksDBFlowFileRepository repo = new RocksDBFlowFileRepository(NiFiProperties.createBasicNiFiProperties(nifiPropertiesPath, additionalProperties))) {
 
             repo.initialize(new StandardResourceClaimManager());
-            repo.loadFlowFiles(queueProvider);
-
-            final Connection connection = addConnectionToProvider(queueProvider);
+            repo.loadFlowFiles(testQueue.provider);
 
             StandardFlowFileRecord.Builder ffBuilder = new StandardFlowFileRecord.Builder();
             ffBuilder.addAttribute("abc", "xyz");
             ffBuilder.size(0L);
 
-            List<RepositoryRecord> record1 = getCreateRecord(ffBuilder.id(1).build(), connection);
-            List<RepositoryRecord> record2 = getCreateRecord(ffBuilder.id(2).build(), connection);
-            List<RepositoryRecord> record3 = getCreateRecord(ffBuilder.id(3).build(), connection);
+            List<RepositoryRecord> record1 = testQueue.getRepositoryRecord(ffBuilder.id(1).build());
+            List<RepositoryRecord> record2 = testQueue.getRepositoryRecord(ffBuilder.id(2).build());
+            List<RepositoryRecord> record3 = testQueue.getRepositoryRecord(ffBuilder.id(3).build());
 
             // CREATE one... should incur no penalty
             repo.updateRepository(record1);
@@ -647,55 +624,29 @@ public class TestRocksDBFlowFileRepository {
             assertTrue(repo.stallNewFlowFiles);
             assertTrue(repo.stopNewFlowFiles);
 
-            // mark records for delete
-            ((StandardRepositoryRecord) record1.get(0)).markForDelete();
-            ((StandardRepositoryRecord) record2.get(0)).markForDelete();
-            ((StandardRepositoryRecord) record3.get(0)).markForDelete();
-
             // DELETE one... should be stalled but not stopped
+            ((StandardRepositoryRecord) record1.get(0)).markForDelete();
             repo.updateRepository(record1);
             repo.updateStallStop();
             assertTrue(repo.stallNewFlowFiles);
             assertFalse(repo.stopNewFlowFiles);
 
             // DELETE another... shouldn't be stalled or stopped
-            repo.updateRepository(record1);
+            ((StandardRepositoryRecord) record2.get(0)).markForDelete();
+            repo.updateRepository(record2);
             repo.updateStallStop();
             assertFalse(repo.stallNewFlowFiles);
             assertFalse(repo.stopNewFlowFiles);
         }
     }
 
-    private Connection addConnectionToProvider(TestQueueProvider queueProvider) {
-        return addConnectionToProvider(queueProvider, null);
-    }
-
-    private Connection addConnectionToProvider(TestQueueProvider queueProvider, final Collection<FlowFileRecord> flowFileQueue) {
-
-        final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
-            @Override
-            public void put(final FlowFileRecord file) {
-                if (flowFileQueue != null) {
-                    flowFileQueue.add(file);
-                }
-            }
-        };
-
-        final Connection connection = Mockito.mock(Connection.class);
-        when(connection.getIdentifier()).thenReturn(queue.getIdentifier());
-        when(connection.getFlowFileQueue()).thenReturn(queue);
-
-        queueProvider.addConnection(connection);
-        return connection;
-    }
-
     private class TestQueue {
-        private final TestQueueProvider queueProvider;
+        private final TestQueueProvider provider;
         private final Collection<FlowFileRecord> queuedFlowFiles;
         private final Connection connection;
 
         TestQueue() {
-            queueProvider = new TestQueueProvider();
+            provider = new TestQueueProvider();
             queuedFlowFiles = new ConcurrentSkipListSet<>(); // potentially accessed from multiple threads
 
             final FlowFileQueue queue = new StandardFlowFileQueue("1234", null, null, null, null, null, null, null, 0, 0, "0 B") {
@@ -709,12 +660,11 @@ public class TestRocksDBFlowFileRepository {
             when(connection.getIdentifier()).thenReturn(queue.getIdentifier());
             when(connection.getFlowFileQueue()).thenReturn(queue);
 
-            queueProvider.addConnection(connection);
+            provider.addConnection(connection);
 
         }
 
         void deleteQueuedFlowFiles(RocksDBFlowFileRepository repo) throws IOException {
-
             Collection<RepositoryRecord> recordsToDelete = queuedFlowFiles.stream().map((Function<FlowFileRecord, RepositoryRecord>) flowFileRecord -> {
                 StandardRepositoryRecord record = new StandardRepositoryRecord(null, flowFileRecord);
                 record.markForDelete();
@@ -725,7 +675,7 @@ public class TestRocksDBFlowFileRepository {
             queuedFlowFiles.clear();
         }
 
-        private List<RepositoryRecord> getCreateRecord(final FlowFileRecord flowFileRecord) {
+        private List<RepositoryRecord> getRepositoryRecord(final FlowFileRecord flowFileRecord) {
             final StandardRepositoryRecord record = new StandardRepositoryRecord(null);
             record.setWorking(flowFileRecord);
             record.setDestination(connection.getFlowFileQueue());
