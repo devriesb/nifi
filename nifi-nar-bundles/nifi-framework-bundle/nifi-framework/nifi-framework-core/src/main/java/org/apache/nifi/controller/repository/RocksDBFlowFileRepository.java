@@ -902,16 +902,6 @@ public class RocksDBFlowFileRepository implements FlowFileRepository {
         return swapLocation.substring(lastIndex + 1);
     }
 
-
-    /**
-     * Swaps the FlowFiles that live on the given Connection out to disk, using
-     * the specified Swap File and returns the number of FlowFiles that were
-     * persisted.
-     *
-     * @param queue        queue to swap out
-     * @param swapLocation location to swap to
-     * @throws IOException ioe
-     */
     @Override
     public void swapFlowFilesOut(final List<FlowFileRecord> swappedOut, final FlowFileQueue queue,
                                  final String swapLocation) throws IOException {
