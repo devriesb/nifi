@@ -99,7 +99,7 @@ public class RocksDBMetronome implements Closeable {
     private final Condition syncCondition = syncLock.newCondition();
     private final AtomicInteger syncCounter = new AtomicInteger(0);
 
-    private RocksDB rocksDB = null;
+    private volatile RocksDB rocksDB = null;
     private final ReentrantReadWriteLock dbReadWriteLock = new ReentrantReadWriteLock();
     private final ReentrantReadWriteLock.ReadLock dbReadLock = dbReadWriteLock.readLock();
     private final ReentrantReadWriteLock.WriteLock dbWriteLock = dbReadWriteLock.writeLock();
@@ -248,7 +248,7 @@ public class RocksDBMetronome implements Closeable {
 
     /**
      * This method checks the state of the database to ensure it is available for use.
-     *
+     * <p>
      * NOTE: This *must* be called holding the dbReadLock
      *
      * @throws IllegalStateException if the database is closed or not yet initialized
@@ -263,6 +263,14 @@ public class RocksDBMetronome implements Closeable {
 
     }
 
+    /**
+     * Return an iterator over the specified column family. The iterator is initially invalid (caller must call one of the Seek methods on the iterator before using it).
+     * <p>
+     * Caller should close the iterator when it is no longer needed. The returned iterator should be closed before this db is closed.
+     *
+     * @param columnFamilyHandle specifies the column family for the iterator
+     * @return
+     */
     public RocksIterator getIterator(final ColumnFamilyHandle columnFamilyHandle) {
         dbReadLock.lock();
         try {
@@ -273,6 +281,14 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * Get the value for the provided key in the specified column family
+     *
+     * @param columnFamilyHandle the column family from which to get the value
+     * @param key                the key of the value to retrieve
+     * @return the value for the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public byte[] get(final ColumnFamilyHandle columnFamilyHandle, final byte[] key) throws RocksDBException {
         dbReadLock.lock();
         try {
@@ -283,6 +299,15 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * Put the key / value pair into the database in the specified column family
+     *
+     * @param columnFamilyHandle the column family in to which to put the value
+     * @param writeOptions       specification of options for write operations
+     * @param key                the key to be inserted
+     * @param value              the value to be associated with the specified key
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void put(final ColumnFamilyHandle columnFamilyHandle, WriteOptions writeOptions, final byte[] key, final byte[] value) throws RocksDBException {
         dbReadLock.lock();
         try {
@@ -293,6 +318,14 @@ public class RocksDBMetronome implements Closeable {
         }
     }
 
+    /**
+     * Delete the key / value pair from the specified column family
+     *
+     * @param columnFamilyHandle the column family in to which to put the value
+     * @param writeOptions       specification of options for write operations
+     * @param key                the key to be inserted
+     * @throws RocksDBException thrown if there is an error in the underlying library.
+     */
     public void delete(final ColumnFamilyHandle columnFamilyHandle, final byte[] key, final WriteOptions writeOptions) throws RocksDBException {
         dbReadLock.lock();
         try {
